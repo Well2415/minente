@@ -295,6 +295,7 @@ export default function PontoRapido() {
           }
         );
     }
+  }, [selectedEmployeeId, currentTime, records, employees, addRecord, addNotification, getEffectiveWorkSchedule, parseWorkSchedule]);
 
 
   const getStatusText = useCallback(() => {
