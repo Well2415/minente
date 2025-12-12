@@ -19,9 +19,9 @@ import { Clock as ClockIcon, ArrowLeft } from 'lucide-react'; // Renomear para e
 import { Badge } from '@/components/ui/badge'; // Importar Badge
 import { useNavigate } from 'react-router-dom'; // Importar useNavigate
 import { useNotifications } from '@/hooks/useNotifications'; // Importar useNotifications
+import { toast as sonnerToast } from 'sonner'; // Importar toast do Sonner
 
 export default function PontoRapido() {
-  const { toast } = useToast();
   const { addNotification } = useNotifications(); // Inicializar useNotifications
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null);
   const { addRecord, records, getEffectiveWorkSchedule, parseWorkSchedule, getTodayRecords, getLastRecord } = useTimeRecords(selectedEmployeeId || undefined);
@@ -66,11 +66,10 @@ export default function PontoRapido() {
 
   const handleRecord = useCallback((type: TimeRecordType) => {
     if (!selectedEmployeeId) {
-      toast({
-        title: 'Selecione um funcionário',
-        description: 'Por favor, escolha um funcionário para registrar o ponto.',
-        variant: 'destructive',
-      });
+      sonnerToast.error(
+        'Selecione um funcionário',
+        { description: 'Por favor, escolha um funcionário para registrar o ponto.' }
+      );
       return;
     }
 
@@ -198,11 +197,10 @@ export default function PontoRapido() {
 
 
             if (showAlert) {
-                toast({
-                    title: 'Atenção: Inconsistência de Ponto',
-                    description: `${alertMessage} Por favor, verifique sua escala ou informe seu gerente.`,
-                    variant: 'destructive', // Alterado para 'destructive'
-                });
+                sonnerToast.error(
+                    'Atenção: Inconsistência de Ponto',
+                    { description: `${alertMessage} Por favor, verifique sua escala ou informe seu gerente.` }
+                );
                 if (employee) { // Garantir que o funcionário existe antes de notificar o gerente
                   addNotification(
                     `Inconsistência de ponto para ${employee.name}: ${alertMessage}`,
@@ -262,11 +260,10 @@ export default function PontoRapido() {
 
 
     if (!isValidAction) {
-        toast({
-            title: 'Ação inválida',
-            description: message,
-            variant: 'destructive',
-        });
+        sonnerToast.error(
+            'Ação inválida',
+            { description: message }
+        );
         return;
     }
 
@@ -277,11 +274,11 @@ export default function PontoRapido() {
       timestamp: currentTime.toISOString(),
     });
 
-    toast({
-      title: 'Ponto registrado!',
-      description: `Registro de ${type} para ${employees.find(e => e.id === selectedEmployeeId)?.name} às ${format(currentTime, 'HH:mm:ss')}.`,
-    });
-  }, [selectedEmployeeId, currentTime, records, employees, addRecord, toast, getEffectiveWorkSchedule, parseWorkSchedule]);
+    sonnerToast.success(
+      'Ponto registrado!',
+      { description: `Registro de ${type} para ${employees.find(e => e.id === selectedEmployeeId)?.name} às ${format(currentTime, 'HH:mm:ss')}.` }
+    );
+  }, [selectedEmployeeId, currentTime, records, employees, addRecord, getEffectiveWorkSchedule, parseWorkSchedule]);
 
 
   const getStatusText = useCallback(() => {
