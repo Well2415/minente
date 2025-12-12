@@ -131,6 +131,44 @@ export default function PontoRapido() {
             let showAlert = false;
             let alertMessage = '';
 
+            // Nova lógica: verificar se o currentTime está dentro de algum período de trabalho esperado
+            let isWithinAnyWorkPeriod = false;
+            const periodToleranceMinutes = 15; // Margem de tolerância para o início/fim dos períodos
+
+            for (const period of periods) {
+                const [startStr, endStr] = period.split('-');
+                if (startStr && endStr) {
+                    const [startH, startM] = startStr.split(':').map(Number);
+                    const [endH, endM] = endStr.split(':').map(Number);
+
+                    let periodStart = setMinutes(setHours(new Date(referenceDateForShift), startH), startM);
+                    let periodEnd = setMinutes(setHours(new Date(referenceDateForShift), endH), endM);
+                    
+                    if (endH < startH || (endH === startH && endM < startM)) {
+                        periodEnd = addDays(periodEnd, 1);
+                    }
+
+                    const bufferedPeriodStart = setMinutes(periodStart, periodStart.getMinutes() - periodToleranceMinutes);
+                    const bufferedPeriodEnd = setMinutes(periodEnd, periodEnd.getMinutes() + periodToleranceMinutes);
+
+                    if (isAfter(currentTime, bufferedPeriodStart) && isBefore(currentTime, bufferedPeriodEnd)) {
+                        isWithinAnyWorkPeriod = true;
+                        break;
+                    }
+                }
+            }
+
+            // Se o ponto não é um 'clock-out' e não está dentro de nenhum período de trabalho esperado
+            if (!isWithinAnyWorkPeriod && type !== 'clock-out') {
+                showAlert = true;
+                alertMessage = `Você está registrando um ${type === 'clock-in' ? 'entrada' : type === 'break-start' ? 'início de intervalo' : 'fim de intervalo'} fora de qualquer período de trabalho esperado para hoje.`;
+            }
+            // Para 'clock-out', podemos ser mais flexíveis ou ter uma mensagem diferente
+            else if (!isWithinAnyWorkPeriod && type === 'clock-out') {
+                 showAlert = true;
+                 alertMessage = `Você está registrando a saída fora de qualquer período de trabalho esperado para hoje.`;
+            }
+
             if (type === 'clock-in' && expectedStart) {
                 const bufferStart = setMinutes(expectedStart, expectedStart.getMinutes() - gracePeriodMinutes);
                 if (isBefore(currentTime, bufferStart)) {
@@ -155,6 +193,7 @@ export default function PontoRapido() {
                     alertMessage = `Você está registrando um ${type === 'break-start' ? 'início' : 'fim'} de intervalo fora do horário de trabalho esperado (${format(expectedStart, 'HH:mm')} - ${format(expectedEnd, 'HH:mm')}).`;
                 }
             }
+
 
             if (showAlert) {
                 toast({
