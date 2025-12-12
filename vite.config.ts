@@ -10,9 +10,15 @@ export default defineConfig(({ mode }) => ({
     port: 8080,
   },
   plugins: [react(), mode === "development" && componentTagger()].filter(Boolean),
+  optimizeDeps: {
+    include: ['jspdf', 'html2canvas'],
+  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      "jspdf": path.resolve(__dirname, "node_modules/jspdf/dist/jspdf.umd.min.js"),
+      "html2canvas": path.resolve(__dirname, "node_modules/html2canvas/dist/html2canvas.min.js"),
     },
   },
+
 }));

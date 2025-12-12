@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTimeRecords } from '@/hooks/useTimeRecords';
 import { AppLayout } from '@/components/layout/AppLayout';
@@ -15,16 +15,35 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
-import { Users, Search, Eye, Clock, Calendar, TrendingUp } from 'lucide-react';
+import { Users, Search, Eye, Clock, Calendar, TrendingUp, PlusCircle, Edit } from 'lucide-react';
 import { format, startOfWeek, endOfWeek, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { User } from '@/types';
+import { User, WorkScheduleTemplate } from '@/types'; // Adicionado WorkScheduleTemplate
+import { formatHoursDecimal, translateRecordType } from '@/lib/utils';
+import EmployeeForm from '@/components/forms/EmployeeForm';
+import { useToast } from '@/components/ui/use-toast';
+import { v4 as uuidv4 } from 'uuid';
 
 export default function Funcionarios() {
   const { user } = useAuth();
-  const { getAllEmployeesSummary, records } = useTimeRecords();
+  const { records } = useTimeRecords();
+  const [allUsers, setAllUsers] = useState<User[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedEmployee, setSelectedEmployee] = useState<User | null>(null);
+  const [selectedEmployeeDetails, setSelectedEmployeeDetails] = useState<User | null>(null);
+  const [isFormOpen, setIsFormOpen] = useState(false);
+  const [editingEmployee, setEditingEmployee] = useState<User | null>(null);
+  const [workScheduleTemplates, setWorkScheduleTemplates] = useState<WorkScheduleTemplate[]>([]); // Novo estado para templates
+  const { toast } = useToast();
+
+  useEffect(() => {
+    const storedUsers = JSON.parse(localStorage.getItem('users') || '[]') as User[];
+    setAllUsers(storedUsers);
+    const storedTemplates = JSON.parse(localStorage.getItem('workScheduleTemplates') || '[]');
+    setWorkScheduleTemplates(storedTemplates);
+  }, []);
+
+  const { getAllEmployeesSummary } = useTimeRecords(allUsers);
+
 
   const today = new Date();
   const weekStart = startOfWeek(today, { weekStartsOn: 1 });
@@ -68,6 +87,28 @@ export default function Funcionarios() {
     'on-break': { label: 'Em pausa', color: 'bg-warning text-warning-foreground' },
     finished: { label: 'Finalizado', color: 'bg-primary text-primary-foreground' },
   };
+  const handleSaveEmployee = (employeeToSave: User) => {
+    const storedUsers = JSON.parse(localStorage.getItem('users') || '[]') as User[];
+    
+    const existingUserIndex = storedUsers.findIndex(u => u.id === employeeToSave.id);
+    
+    if (existingUserIndex > -1) {
+      storedUsers[existingUserIndex] = employeeToSave;
+    } else {
+      storedUsers.push(employeeToSave);
+    }
+    
+    localStorage.setItem('users', JSON.stringify(storedUsers));
+    setAllUsers(storedUsers);
+    
+    toast({
+      title: 'Sucesso!',
+      description: `Funcionário ${employeeToSave.name} salvo com sucesso.`,
+    });
+
+    setIsFormOpen(false);
+    setEditingEmployee(null);
+  };
 
   return (
     <AppLayout>
@@ -76,21 +117,38 @@ export default function Funcionarios() {
           <div>
             <h1 className="text-3xl font-display font-bold">Funcionários</h1>
             <p className="text-muted-foreground">
-              Acompanhe o ponto da sua equipe em tempo real
+              Acompanhe e gerencie sua equipe
             </p>
           </div>
-          <div className="relative w-full sm:w-64">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Buscar funcionário..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10"
-            />
+          <div className="flex items-center gap-2">
+            <div className="relative w-full sm:w-64">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Buscar funcionário..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-10"
+              />
+            </div>
+            <Button onClick={() => { setEditingEmployee(null); setIsFormOpen(true); }} className="gradient-bg">
+              <PlusCircle className="mr-2 h-4 w-4" />
+              Adicionar
+            </Button>
           </div>
         </div>
-
-        {/* Stats Cards */}
+        
+        {/* Modal de Adicionar/Editar Funcionário */}
+        <Dialog open={isFormOpen} onOpenChange={setIsFormOpen}>
+          <DialogContent className="max-w-3xl">
+            <EmployeeForm 
+              employee={editingEmployee}
+              onSave={handleSaveEmployee}
+              onClose={() => setIsFormOpen(false)}
+            />
+          </DialogContent>
+        </Dialog>
+        
+        {/* Stats Cards ... (código dos cards permanece o mesmo) */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <Card>
             <CardContent className="p-4">
@@ -154,6 +212,7 @@ export default function Funcionarios() {
           </Card>
         </div>
 
+
         {/* Employees Grid */}
         <Card>
           <CardHeader>
@@ -199,7 +258,7 @@ export default function Funcionarios() {
 
                       <div className="grid grid-cols-3 gap-2 text-center mb-4">
                         <div className="p-2 bg-secondary/50 rounded">
-                          <p className="text-lg font-semibold">{summary.totalHours.toFixed(1)}h</p>
+                          <p className="text-lg font-semibold">{formatHoursDecimal(summary.totalHours)}</p>
                           <p className="text-xs text-muted-foreground">Semana</p>
                         </div>
                         <div className="p-2 bg-secondary/50 rounded">
@@ -207,69 +266,96 @@ export default function Funcionarios() {
                           <p className="text-xs text-muted-foreground">Dias</p>
                         </div>
                         <div className="p-2 bg-secondary/50 rounded">
-                          <p className="text-lg font-semibold">{summary.averageHoursPerDay.toFixed(1)}h</p>
+                          <p className="text-lg font-semibold">{formatHoursDecimal(summary.averageHoursPerDay)}</p>
                           <p className="text-xs text-muted-foreground">Média</p>
                         </div>
                       </div>
 
-                      <Dialog>
-                        <DialogTrigger asChild>
-                          <Button
-                            variant="outline"
-                            className="w-full"
-                            onClick={() => setSelectedEmployee(summary.user)}
-                          >
-                            <Eye className="mr-2 h-4 w-4" />
-                            Ver detalhes
-                          </Button>
-                        </DialogTrigger>
-                        <DialogContent className="max-w-md">
-                          <DialogHeader>
-                            <DialogTitle className="flex items-center gap-3">
-                              <Avatar className="h-10 w-10">
-                                <AvatarFallback className="bg-primary/10 text-primary">
-                                  {summary.user.name
-                                    .split(' ')
-                                    .map((n: string) => n[0])
-                                    .join('')
-                                    .slice(0, 2)}
-                                </AvatarFallback>
-                              </Avatar>
-                              {summary.user.name}
-                            </DialogTitle>
-                          </DialogHeader>
-                          <div className="space-y-4">
-                            <div className="p-4 bg-secondary/50 rounded-lg">
-                              <p className="text-sm text-muted-foreground mb-1">Departamento</p>
-                              <p className="font-medium">{summary.user.department}</p>
-                            </div>
-                            <div>
-                              <p className="font-medium mb-2">Registros de hoje</p>
-                              {todayRecords.length > 0 ? (
-                                <div className="space-y-2">
-                                  {todayRecords.map((record) => (
-                                    <div
-                                      key={record.id}
-                                      className="flex items-center justify-between p-2 bg-secondary/30 rounded"
-                                    >
-                                      <span className="text-sm capitalize">
-                                        {record.type.replace('-', ' ')}
-                                      </span>
-                                      <span className="text-sm font-medium">
-                                        {format(parseISO(record.timestamp), 'HH:mm')}
-                                      </span>
-                                    </div>
-                                  ))}
+                      <div className="flex gap-2">
+                        <Dialog>
+                          <DialogTrigger asChild>
+                            <Button
+                              variant="outline"
+                              className="w-full"
+                              onClick={() => setSelectedEmployeeDetails(summary.user)}
+                            >
+                              <Eye className="mr-2 h-4 w-4" />
+                              Ver detalhes
+                            </Button>
+                          </DialogTrigger>
+                          <DialogContent className="max-w-lg">
+                            <DialogHeader>
+                              <DialogTitle className="flex items-center gap-3">
+                                <Avatar className="h-10 w-10">
+                                  <AvatarFallback className="bg-primary/10 text-primary">
+                                    {summary.user.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2)}
+                                  </AvatarFallback>
+                                </Avatar>
+                                {summary.user.name}
+                              </DialogTitle>
+                            </DialogHeader>
+                            {selectedEmployeeDetails && (
+                              <div className="space-y-4 py-4">
+                                <div className="p-4 bg-secondary/50 rounded-lg">
+                                  <p className="text-sm text-muted-foreground mb-1">Departamento</p>
+                                  <p className="font-medium">{selectedEmployeeDetails.department}</p>
                                 </div>
-                              ) : (
-                                <p className="text-sm text-muted-foreground">
-                                  Nenhum registro hoje
-                                </p>
-                              )}
-                            </div>
-                          </div>
-                        </DialogContent>
-                      </Dialog>
+                                {/* Informações da Jornada de Trabalho */}
+                                <div className="p-4 bg-secondary/50 rounded-lg">
+                                  <p className="text-sm text-muted-foreground mb-1">Jornada de Trabalho</p>
+                                  {selectedEmployeeDetails.workScheduleTemplateId ? (
+                                    (() => {
+                                      const template = workScheduleTemplates.find(
+                                        (t) => t.id === selectedEmployeeDetails.workScheduleTemplateId
+                                      );
+                                      if (template) {
+                                        return (
+                                          <>
+                                            <p className="font-medium">Modelo: {template.name}</p>
+                                            <p className="text-sm text-muted-foreground">Seg-Sex: {template.workSchedule}</p>
+                                            {template.saturdayWorkSchedule && <p className="text-sm text-muted-foreground">Sábados: {template.saturdayWorkSchedule}</p>}
+                                            {template.weeklyRestDay && <p className="text-sm text-muted-foreground">Descanso: {template.weeklyRestDay}</p>}
+                                          </>
+                                        );
+                                      } else {
+                                        return <p className="text-sm text-muted-foreground">Modelo de jornada não encontrado.</p>;
+                                      }
+                                    })()
+                                  ) : (
+                                    <p className="text-sm text-muted-foreground">Jornada de trabalho não definida.</p>
+                                  )}
+                                </div>
+                                {/* Registros de hoje */}
+                                <div>
+                                  <p className="font-medium mb-2">Registros de hoje</p>
+                                  <ScrollArea className="h-48 rounded-md border p-4">
+                                    {todayRecords.length > 0 ? (
+                                      <div className="space-y-2">
+                                        {todayRecords.map((record) => (
+                                          <div key={record.id} className="flex items-center justify-between p-2 bg-secondary/30 rounded">
+                                            <span className="text-sm">{translateRecordType(record.type)}</span>
+                                            <span className="text-sm font-medium">{format(parseISO(record.timestamp), 'HH:mm')}</span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <p className="text-sm text-muted-foreground">Nenhum registro hoje</p>
+                                    )}
+                                  </ScrollArea>
+                                </div>
+                              </div>
+                            )}
+                          </DialogContent>
+                        </Dialog>
+                        <Button
+                            variant="secondary"
+                            className="w-full"
+                            onClick={() => { setEditingEmployee(summary.user); setIsFormOpen(true); }}
+                        >
+                            <Edit className="mr-2 h-4 w-4" />
+                            Editar
+                        </Button>
+                      </div>
                     </div>
                   );
                 })}

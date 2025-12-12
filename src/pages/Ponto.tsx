@@ -11,6 +11,7 @@ import { ptBR } from 'date-fns/locale';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { formatHoursDecimal } from '@/lib/utils';
 
 export default function Ponto() {
   const { user } = useAuth();
@@ -23,6 +24,8 @@ export default function Ponto() {
 
   const allDays = eachDayOfInterval({ start: monthStart, end: monthEnd });
   const totalHours = workDays.reduce((sum, day) => sum + day.totalHours, 0);
+  const daysWorkedCount = workDays.filter((d) => d.totalHours > 0).length;
+  const averageHours = daysWorkedCount > 0 ? totalHours / daysWorkedCount : 0;
 
   const getRecordIcon = (type: string) => {
     switch (type) {
@@ -86,106 +89,123 @@ export default function Ponto() {
               <div className="flex items-center gap-4 mb-4 p-4 bg-secondary/50 rounded-lg">
                 <div className="flex-1">
                   <p className="text-sm text-muted-foreground">Total de horas</p>
-                  <p className="text-2xl font-display font-bold">{totalHours.toFixed(1)}h</p>
+                  <p className="text-2xl font-display font-bold">
+                    {formatHoursDecimal(totalHours)}
+                  </p>
                 </div>
                 <div className="flex-1">
                   <p className="text-sm text-muted-foreground">Dias trabalhados</p>
                   <p className="text-2xl font-display font-bold">
-                    {workDays.filter((d) => d.totalHours > 0).length}
+                    {daysWorkedCount}
                   </p>
                 </div>
                 <div className="flex-1">
                   <p className="text-sm text-muted-foreground">Média diária</p>
                   <p className="text-2xl font-display font-bold">
-                    {workDays.filter((d) => d.totalHours > 0).length > 0
-                      ? (totalHours / workDays.filter((d) => d.totalHours > 0).length).toFixed(1)
-                      : '0.0'}
-                    h
+                    {formatHoursDecimal(averageHours)}
                   </p>
                 </div>
               </div>
 
               <ScrollArea className="h-[400px]">
                 <div className="space-y-2">
-                  {allDays.map((day) => {
-                    const dateStr = format(day, 'yyyy-MM-dd');
-                    const workDay = workDays.find((wd) => wd.date === dateStr);
-                    const dayRecords = records.filter(
-                      (r) => r.timestamp.startsWith(dateStr)
-                    ).sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+                  {/* Lógica para ordenar os dias com o dia atual primeiro */}
+                  {(() => {
+                    const todayDateStr = format(new Date(), 'yyyy-MM-dd');
+                    const todayElement = allDays.find(day => format(day, 'yyyy-MM-dd') === todayDateStr);
+                    const olderDays = allDays
+                      .filter(day => format(day, 'yyyy-MM-dd') < todayDateStr)
+                      .sort((a, b) => b.getTime() - a.getTime()); // Do mais recente para o mais antigo
+                    const newerDays = allDays
+                      .filter(day => format(day, 'yyyy-MM-dd') > todayDateStr)
+                      .sort((a, b) => a.getTime() - b.getTime()); // Do mais antigo para o mais recente
 
-                    const isToday = format(new Date(), 'yyyy-MM-dd') === dateStr;
-                    const isWeekend = day.getDay() === 0 || day.getDay() === 6;
+                    let orderedDays: Date[] = [];
+                    if (todayElement) {
+                      orderedDays.push(todayElement);
+                    }
+                    orderedDays = orderedDays.concat(olderDays, newerDays);
 
-                    return (
-                      <div
-                        key={dateStr}
-                        className={`p-3 rounded-lg border transition-colors ${
-                          isToday
-                            ? 'border-primary bg-primary/5'
-                            : isWeekend
-                            ? 'border-border/50 bg-muted/30'
-                            : 'border-border hover:bg-secondary/50'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <div
-                              className={`w-10 h-10 rounded-lg flex items-center justify-center font-display font-bold ${
-                                isToday
-                                  ? 'gradient-bg text-primary-foreground'
-                                  : 'bg-secondary text-foreground'
-                              }`}
-                            >
-                              {format(day, 'd')}
-                            </div>
-                            <div>
-                              <p className="font-medium">
-                                {format(day, 'EEEE', { locale: ptBR })}
-                              </p>
-                              <div className="flex items-center gap-2 mt-1">
-                                {dayRecords.map((r) => (
-                                  <div
-                                    key={r.id}
-                                    className="flex items-center gap-1 text-xs"
-                                    title={`${r.type} - ${format(parseISO(r.timestamp), 'HH:mm')}`}
-                                  >
-                                    {getRecordIcon(r.type)}
-                                    <span className="text-muted-foreground">
-                                      {format(parseISO(r.timestamp), 'HH:mm')}
-                                    </span>
-                                  </div>
-                                ))}
+                    return orderedDays.map((day) => {
+                      const dateStr = format(day, 'yyyy-MM-dd');
+                      const workDay = workDays.find((wd) => wd.date === dateStr);
+                      const dayRecords = records.filter(
+                        (r) => r.timestamp.startsWith(dateStr)
+                      ).sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+                      const isToday = format(new Date(), 'yyyy-MM-dd') === dateStr;
+                      const isWeekend = day.getDay() === 0 || day.getDay() === 6;
+
+                      return (
+                        <div
+                          key={dateStr}
+                          className={`p-3 rounded-lg border transition-colors ${
+                            isToday
+                              ? 'border-primary bg-primary/5'
+                              : isWeekend
+                              ? 'border-border/50 bg-muted/30'
+                              : 'border-border hover:bg-secondary/50'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <div
+                                className={`w-10 h-10 rounded-lg flex items-center justify-center font-display font-bold ${
+                                  isToday
+                                    ? 'gradient-bg text-primary-foreground'
+                                    : 'bg-secondary text-foreground'
+                                }`}
+                              >
+                                {format(day, 'd')}
+                              </div>
+                              <div>
+                                <p className="font-medium">
+                                  {format(day, 'EEEE', { locale: ptBR })}
+                                </p>
+                                <div className="flex items-center gap-2 mt-1">
+                                  {dayRecords.map((r) => (
+                                    <div
+                                      key={r.id}
+                                      className="flex items-center gap-1 text-xs"
+                                      title={`${r.type} - ${format(parseISO(r.timestamp), 'HH:mm')}`}
+                                    >
+                                      {getRecordIcon(r.type)}
+                                      <span className="text-muted-foreground">
+                                        {format(parseISO(r.timestamp), 'HH:mm')}
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
                               </div>
                             </div>
-                          </div>
-                          <div className="text-right">
-                            {workDay && workDay.totalHours > 0 ? (
-                              <>
-                                <p className="font-semibold">
-                                  {workDay.totalHours.toFixed(2)}h
-                                </p>
-                                <Badge
-                                  variant={workDay.status === 'complete' ? 'default' : 'secondary'}
-                                  className="text-xs"
-                                >
-                                  {workDay.status === 'complete' ? 'Completo' : 'Em andamento'}
+                            <div className="text-right">
+                              {workDay && workDay.totalHours > 0 ? (
+                                <>
+                                  <p className="font-semibold">
+                                    {formatHoursDecimal(workDay.totalHours)}
+                                  </p>
+                                  <Badge
+                                    variant={workDay.status === 'complete' ? 'default' : 'secondary'}
+                                    className="text-xs"
+                                  >
+                                    {workDay.status === 'complete' ? 'Completo' : 'Em andamento'}
+                                  </Badge>
+                                </>
+                              ) : isWeekend ? (
+                                <Badge variant="outline" className="text-xs">
+                                  Fim de semana
                                 </Badge>
-                              </>
-                            ) : isWeekend ? (
-                              <Badge variant="outline" className="text-xs">
-                                Fim de semana
-                              </Badge>
-                            ) : (
-                              <Badge variant="secondary" className="text-xs">
-                                Sem registro
-                              </Badge>
-                            )}
+                              ) : (
+                                <Badge variant="secondary" className="text-xs">
+                                  Sem registro
+                                </Badge>
+                              )}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    );
-                  }).reverse()}
+                      );
+                    });
+                  })()}
                 </div>
               </ScrollArea>
             </CardContent>

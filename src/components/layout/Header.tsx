@@ -13,9 +13,13 @@ import { Badge } from '@/components/ui/badge';
 import { LogOut, User, Bell } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { useNotifications } from '@/hooks/useNotifications'; // Importar useNotifications
+import { useNavigate } from 'react-router-dom'; // Importar useNavigate
 
 export function Header() {
   const { user, logout } = useAuth();
+  const { notifications, unreadCount, markAsRead, markAllAsRead } = useNotifications(); // Usar o hook de notificações
+  const navigate = useNavigate();
 
   const getInitials = (name: string) => {
     return name
@@ -37,6 +41,13 @@ export function Header() {
     }
   };
 
+  const handleNotificationClick = (notificationId: string, link?: string) => {
+    markAsRead(notificationId);
+    if (link) {
+      navigate(link);
+    }
+  };
+
   return (
     <header className="h-16 border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-10 px-6">
       <div className="h-full flex items-center justify-between">
@@ -53,10 +64,50 @@ export function Header() {
         {/* Right side */}
         <div className="flex items-center gap-4">
           {/* Notifications */}
-          <Button variant="ghost" size="icon" className="relative">
-            <Bell className="h-5 w-5" />
-            <span className="absolute top-1 right-1 w-2 h-2 bg-destructive rounded-full" />
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="relative">
+                <Bell className="h-5 w-5" />
+                {unreadCount > 0 && ( // Condicionalmente exibir ponto vermelho
+                  <span className="absolute top-1 right-1 w-2 h-2 bg-destructive rounded-full" />
+                )}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-80">
+              <DropdownMenuLabel>Notificações</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {notifications.length === 0 ? (
+                <DropdownMenuItem className="text-center text-muted-foreground text-sm py-2">
+                  Nenhuma notificação
+                </DropdownMenuItem>
+              ) : (
+                <>
+                  {notifications.map((notif) => (
+                    <DropdownMenuItem
+                      key={notif.id}
+                      className={cn(
+                        "flex flex-col items-start gap-1 cursor-pointer",
+                        !notif.read && "bg-accent/50" // Destaque para não lidas
+                      )}
+                      onClick={() => handleNotificationClick(notif.id, notif.link)}
+                    >
+                      <p className="font-medium">{notif.message}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {format(new Date(notif.timestamp), 'dd/MM HH:mm')}
+                      </p>
+                    </DropdownMenuItem>
+                  ))}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    className="text-center text-muted-foreground text-sm py-2 cursor-pointer"
+                    onClick={markAllAsRead}
+                  >
+                    Marcar todas como lidas
+                  </DropdownMenuItem>
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
 
           {/* User menu */}
           <DropdownMenu>

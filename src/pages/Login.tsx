@@ -26,7 +26,7 @@ export default function Login() {
     if (success) {
       toast({
         title: 'Login realizado com sucesso!',
-        description: 'Bem-vindo ao PontoMax.',
+        description: 'Bem-vindo ao SerpPonto.',
       });
       navigate('/dashboard');
     } else {
@@ -44,20 +44,27 @@ export default function Login() {
     <div className="min-h-screen flex">
       {/* Left side - Branding */}
       <div className="hidden lg:flex lg:w-1/2 gradient-bg relative overflow-hidden">
+        {/* Background Image */}
+        <img 
+          src="/img/mercado.jpg" 
+          alt="Imagem de fundo de um supermercado" 
+          className="absolute inset-0 w-full h-full object-cover opacity-20 blur-sm"
+        />
+        
         <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmZmZmYiIGZpbGwtb3BhY2l0eT0iMC4xIj48cGF0aCBkPSJNMzYgMzRjMC0yLjIxLTEuNzktNC00LTRzLTQgMS43OS00IDQgMS43OSA0IDQgNCA0LTEuNzkgNC00eiIvPjwvZz48L2c+PC9zdmc+')] opacity-30" />
         
-        <div className="relative z-10 flex flex-col justify-center p-12 text-primary-foreground">
+        <div className="relative z-10 flex flex-col justify-center p-12 text-white">
           <div className="flex items-center gap-4 mb-8">
-            <div className="w-16 h-16 rounded-2xl bg-primary-foreground/20 backdrop-blur flex items-center justify-center">
-              <Clock className="h-8 w-8" />
+            <div className="w-16 h-16 rounded-2xl bg-white/10 backdrop-blur p-2 flex items-center justify-center">
+              <img src="/img/LOGOSISTEMA.png" alt="SerpPonto Logo" />
             </div>
-            <h1 className="text-4xl font-display font-bold">PontoMax</h1>
+            <h1 className="text-4xl font-display font-bold">SerpPonto</h1>
           </div>
           
           <h2 className="text-3xl font-display font-semibold mb-4">
             Gestão de Ponto Inteligente
           </h2>
-          <p className="text-lg text-primary-foreground/80 max-w-md">
+          <p className="text-lg text-white max-w-md">
             Controle a jornada de trabalho da sua equipe com praticidade, 
             precisão e relatórios detalhados em tempo real.
           </p>
@@ -69,9 +76,9 @@ export default function Login() {
               { label: 'Controle Total', desc: 'Gerencie sua equipe' },
               { label: 'Seguro', desc: 'Dados protegidos' },
             ].map((item) => (
-              <div key={item.label} className="bg-primary-foreground/10 backdrop-blur rounded-lg p-4">
+              <div key={item.label} className="bg-white/10 backdrop-blur rounded-lg p-4">
                 <h3 className="font-semibold">{item.label}</h3>
-                <p className="text-sm text-primary-foreground/70">{item.desc}</p>
+                <p className="text-sm text-white/70">{item.desc}</p>
               </div>
             ))}
           </div>
@@ -83,10 +90,10 @@ export default function Login() {
         <div className="w-full max-w-md animate-fade-in">
           {/* Mobile Logo */}
           <div className="lg:hidden flex items-center justify-center gap-3 mb-8">
-            <div className="w-12 h-12 rounded-xl gradient-bg flex items-center justify-center">
-              <Clock className="h-6 w-6 text-primary-foreground" />
+            <div className="w-12 h-12 rounded-xl bg-white/10 backdrop-blur p-1 flex items-center justify-center">
+              <img src="/img/LOGOSISTEMA.png" alt="SerpPonto Logo" />
             </div>
-            <span className="text-2xl font-display font-bold">PontoMax</span>
+            <span className="text-2xl font-display font-bold">SerpPonto</span>
           </div>
 
           <Card className="border-0 shadow-lg">
@@ -99,7 +106,7 @@ export default function Login() {
             <CardContent>
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="email">E-mail</Label>
+                  <Label htmlFor="email" className="text-foreground">E-mail</Label>
                   <div className="relative">
                     <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input
@@ -115,7 +122,7 @@ export default function Login() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="password">Senha</Label>
+                  <Label htmlFor="password" className="text-foreground">Senha</Label>
                   <div className="relative">
                     <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input
@@ -143,8 +150,11 @@ export default function Login() {
                   </div>
                 </div>
 
-                <Button type="submit" className="w-full gradient-bg" disabled={loading}>
+                <Button type="submit" className="w-full gradient-bg mb-4" disabled={loading}>
                   {loading ? 'Entrando...' : 'Entrar'}
+                </Button>
+                <Button variant="outline" onClick={() => navigate('/ponto-rapido')} className="w-full">
+                  Acessar Ponto Rápido
                 </Button>
               </form>
 

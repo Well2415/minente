@@ -1,4 +1,3 @@
-import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTimeRecords } from '@/hooks/useTimeRecords';
 import { Card, CardContent } from '@/components/ui/card';
@@ -8,25 +7,21 @@ import { Play, Square, Coffee, Clock } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useToast } from '@/hooks/use-toast';
+import { formatHoursDecimal } from '@/lib/utils';
 
 export function ClockWidget() {
   const { user } = useAuth();
-  const { addRecord, getLastRecord, getTodayRecords, calculateDayHours } = useTimeRecords(user?.id);
+  const {
+    addRecord,
+    getLastRecord,
+    getTodayRecords,
+    currentTime,
+    todayHours,
+  } = useTimeRecords(user?.id);
   const { toast } = useToast();
-  const [currentTime, setCurrentTime] = useState(new Date());
-  const [todayHours, setTodayHours] = useState(0);
 
   const lastRecord = getLastRecord();
   const todayRecords = getTodayRecords();
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setCurrentTime(new Date());
-      setTodayHours(calculateDayHours(todayRecords));
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, [todayRecords, calculateDayHours]);
 
   const getStatus = () => {
     if (!lastRecord) return 'not-started';
@@ -47,8 +42,16 @@ export function ClockWidget() {
   const status = getStatus();
 
   const handleClockIn = () => {
+    if (!user) {
+      toast({
+        title: 'Erro de autenticação',
+        description: 'Usuário não encontrado. Faça login novamente.',
+        variant: 'destructive',
+      });
+      return;
+    }
     addRecord({
-      userId: user!.id,
+      userId: user.id,
       type: 'clock-in',
       timestamp: new Date().toISOString(),
     });
@@ -59,8 +62,16 @@ export function ClockWidget() {
   };
 
   const handleClockOut = () => {
+    if (!user) {
+      toast({
+        title: 'Erro de autenticação',
+        description: 'Usuário não encontrado. Faça login novamente.',
+        variant: 'destructive',
+      });
+      return;
+    }
     addRecord({
-      userId: user!.id,
+      userId: user.id,
       type: 'clock-out',
       timestamp: new Date().toISOString(),
     });
@@ -71,8 +82,16 @@ export function ClockWidget() {
   };
 
   const handleBreakStart = () => {
+    if (!user) {
+      toast({
+        title: 'Erro de autenticação',
+        description: 'Usuário não encontrado. Faça login novamente.',
+        variant: 'destructive',
+      });
+      return;
+    }
     addRecord({
-      userId: user!.id,
+      userId: user.id,
       type: 'break-start',
       timestamp: new Date().toISOString(),
     });
@@ -83,8 +102,16 @@ export function ClockWidget() {
   };
 
   const handleBreakEnd = () => {
+    if (!user) {
+      toast({
+        title: 'Erro de autenticação',
+        description: 'Usuário não encontrado. Faça login novamente.',
+        variant: 'destructive',
+      });
+      return;
+    }
     addRecord({
-      userId: user!.id,
+      userId: user.id,
       type: 'break-end',
       timestamp: new Date().toISOString(),
     });
@@ -118,7 +145,9 @@ export function ClockWidget() {
       <div className="gradient-bg p-6 text-primary-foreground">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
-            <Clock className="h-5 w-5" />
+            <div className="w-8 h-8 rounded-lg bg-white/10 backdrop-blur p-1 flex items-center justify-center">
+              <img src="/img/LOGOSISTEMA.png" alt="SerpPonto Logo" className="h-5 w-5" />
+            </div>
             <span className="font-medium">Relógio de Ponto</span>
           </div>
           <Badge className={statusConfig[status].color}>
@@ -140,7 +169,7 @@ export function ClockWidget() {
         <div className="flex items-center justify-between mb-6">
           <div>
             <p className="text-sm text-muted-foreground">Horas hoje</p>
-            <p className="text-2xl font-display font-bold">{todayHours.toFixed(2)}h</p>
+            <p className="text-2xl font-display font-bold">{formatHoursDecimal(todayHours)}</p>
           </div>
           <div className="text-right">
             <p className="text-sm text-muted-foreground">Registros</p>

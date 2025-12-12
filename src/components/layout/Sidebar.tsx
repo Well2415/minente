@@ -17,6 +17,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 const navItems = [
   { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard', roles: ['employee', 'manager', 'admin'] },
   { icon: Clock, label: 'Meu Ponto', path: '/ponto', roles: ['employee', 'manager', 'admin'] },
+  { icon: Clock, label: 'Ponto Rápido', path: '/ponto-rapido', roles: ['manager', 'admin'] },
   { icon: Users, label: 'Funcionários', path: '/funcionarios', roles: ['manager', 'admin'] },
   { icon: FileBarChart, label: 'Relatórios', path: '/relatorios', roles: ['manager', 'admin'] },
   { icon: Settings, label: 'Configurações', path: '/configuracoes', roles: ['manager', 'admin'] },
@@ -46,10 +47,8 @@ export function Sidebar() {
           </div>
         ) : (
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg gradient-bg flex items-center justify-center">
-              <Clock className="h-5 w-5 text-primary-foreground" />
-            </div>
-            <span className="font-display font-semibold text-lg">PontoMax</span>
+            <img src="/img/LOGOSISTEMA.png" alt="SerpPonto Logo" className="w-8 h-8 rounded-lg" />
+            <span className="font-display font-semibold text-lg">SerpPonto</span>
           </div>
         )}
       </div>

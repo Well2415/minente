@@ -90,16 +90,34 @@ All colors MUST be HSL.
     --sidebar-accent: 240 3.7% 15.9%;
     --sidebar-accent-foreground: 240 4.8% 95.9%;
     --sidebar-border: 240 3.7% 15.9%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
-  }
-}
-
-@layer base {
-  * {
-    @apply border-border;
-  }
-
-  body {
-    @apply bg-background text-foreground;
-  }
-}
+        --sidebar-ring: 217.2 91.2% 59.8%;
+      }
+    
+      /* Definições específicas para o gradient-bg no modo dark */
+      .gradient-bg {
+        --primary: 240 5.9% 10%; /* Um azul bem escuro para o início do gradiente */
+        --primary-foreground: 210 40% 98%; /* Branco para o texto */
+        /* Você pode ajustar --accent aqui se o gradient-bg usasse --accent */
+      }
+    }
+    
+    @layer base {
+      * {
+        @apply border-border;
+      }
+    
+      body {
+        @apply bg-background text-foreground;
+      }
+    }
+    
+    @layer utilities {
+      .gradient-bg {
+        background-image: linear-gradient(
+          120deg,
+          hsl(var(--primary)),
+          hsl(var(--primary) / 0.8)
+        );
+        color: hsl(var(--primary-foreground));
+      }
+    }

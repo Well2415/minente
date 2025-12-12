@@ -10,6 +10,7 @@ import Ponto from "./pages/Ponto";
 import Funcionarios from "./pages/Funcionarios";
 import Relatorios from "./pages/Relatorios";
 import Configuracoes from "./pages/Configuracoes";
+import PontoRapido from "./pages/PontoRapido"; // Importar o novo componente
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -26,6 +27,7 @@ const App = () => (
             <Route path="/login" element={<Login />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/ponto" element={<Ponto />} />
+            <Route path="/ponto-rapido" element={<PontoRapido />} /> {/* Nova rota */}
             <Route path="/funcionarios" element={<Funcionarios />} />
             <Route path="/relatorios" element={<Relatorios />} />
             <Route path="/configuracoes" element={<Configuracoes />} />

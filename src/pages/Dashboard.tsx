@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react'; // Adicionar useState e useEffect
 import { useAuth } from '@/contexts/AuthContext';
 import { useTimeRecords } from '@/hooks/useTimeRecords';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -5,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Clock, Calendar, TrendingUp, Users, Timer, CheckCircle } from 'lucide-react';
 import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { formatHoursDecimal } from '@/lib/utils';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { ClockWidget } from '@/components/dashboard/ClockWidget';
 import { RecentActivity } from '@/components/dashboard/RecentActivity';
@@ -12,7 +14,12 @@ import { WeeklyChart } from '@/components/dashboard/WeeklyChart';
 
 export default function Dashboard() {
   const { user } = useAuth();
-  const { getWorkDays, getAllEmployeesSummary } = useTimeRecords(user?.id);
+  const {
+    records,
+    getWorkDays,
+    getAllEmployeesSummary,
+    todayHours, // Obter o valor em tempo real do hook
+  } = useTimeRecords(user?.id);
   const isManager = user?.role === 'manager' || user?.role === 'admin';
 
   const today = new Date();
@@ -27,36 +34,44 @@ export default function Dashboard() {
   const monthlyWorkDays = getWorkDays(monthStart, monthEnd, user?.id);
   const monthlyHours = monthlyWorkDays.reduce((sum, day) => sum + day.totalHours, 0);
 
-  const employeesSummary = isManager ? getAllEmployeesSummary(weekStart, weekEnd) : [];
+  const [employeesSummary, setEmployeesSummary] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (isManager) {
+      setEmployeesSummary(getAllEmployeesSummary(weekStart, weekEnd));
+    } else {
+      setEmployeesSummary([]);
+    }
+  }, [isManager, records, getAllEmployeesSummary, weekStart, weekEnd]); // Adicionar records como dependência
 
   const stats = [
     {
       title: 'Horas Hoje',
-      value: weeklyWorkDays.find(d => d.date === format(today, 'yyyy-MM-dd'))?.totalHours.toFixed(1) || '0.0',
-      suffix: 'h',
+      value: formatHoursDecimal(todayHours), // Usar o valor do hook
+      suffix: '',
       icon: Timer,
       color: 'text-primary',
       bgColor: 'bg-primary/10',
     },
     {
       title: 'Horas na Semana',
-      value: weeklyHours.toFixed(1),
-      suffix: 'h',
+      value: formatHoursDecimal(weeklyHours),
+      suffix: '',
       icon: Calendar,
       color: 'text-accent',
       bgColor: 'bg-accent/10',
     },
     {
       title: 'Horas no Mês',
-      value: monthlyHours.toFixed(1),
-      suffix: 'h',
+      value: formatHoursDecimal(monthlyHours),
+      suffix: '',
       icon: TrendingUp,
       color: 'text-success',
       bgColor: 'bg-success/10',
     },
     {
       title: 'Dias Trabalhados',
-      value: monthlyWorkDays.filter(d => d.totalHours > 0).length.toString(),
+      value: monthlyWorkDays.filter((d) => d.totalHours > 0).length.toString(),
       suffix: '',
       icon: CheckCircle,
       color: 'text-warning',
@@ -130,7 +145,7 @@ export default function Dashboard() {
                     </div>
                     <div className="flex items-center gap-6 text-right">
                       <div>
-                        <p className="font-semibold">{summary.totalHours.toFixed(1)}h</p>
+                        <p className="font-semibold">{formatHoursDecimal(summary.totalHours)}</p>
                         <p className="text-xs text-muted-foreground">Total</p>
                       </div>
                       <div>
