@@ -18,9 +18,11 @@ import { useToast } from '@/hooks/use-toast';
 import { Clock as ClockIcon, ArrowLeft } from 'lucide-react'; // Renomear para evitar conflito e adicionar ArrowLeft
 import { Badge } from '@/components/ui/badge'; // Importar Badge
 import { useNavigate } from 'react-router-dom'; // Importar useNavigate
+import { useNotifications } from '@/hooks/useNotifications'; // Importar useNotifications
 
 export default function PontoRapido() {
   const { toast } = useToast();
+  const { addNotification } = useNotifications(); // Inicializar useNotifications
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null);
   const { addRecord, records, getEffectiveWorkSchedule, parseWorkSchedule, getTodayRecords, getLastRecord } = useTimeRecords(selectedEmployeeId || undefined);
   const [employeeCurrentStatus, setEmployeeCurrentStatus] = useState<'clock-in' | 'break-start' | 'clock-out' | null>(null);
@@ -199,10 +201,21 @@ export default function PontoRapido() {
                 toast({
                     title: 'Atenção: Inconsistência de Ponto',
                     description: `${alertMessage} Por favor, verifique sua escala ou informe seu gerente.`,
-                    variant: 'warning',
+                    variant: 'destructive', // Alterado para 'destructive'
                 });
+                if (employee) { // Garantir que o funcionário existe antes de notificar o gerente
+                  addNotification(
+                    `Inconsistência de ponto para ${employee.name}: ${alertMessage}`,
+                    'warning', // Ou 'error' dependendo da severidade que queremos para o gerente
+                    `/funcionarios?id=${employee.id}` // Link para detalhes do funcionário
+                  );
+                }
             }
+        } else {
+            console.log('Nenhum scheduleToParse encontrado para o funcionário ou dia atual.');
         }
+    } else {
+        console.log('Funcionário não encontrado com o ID:', selectedEmployeeId);
     }
     // --- Fim da Lógica de Aviso ---
 
