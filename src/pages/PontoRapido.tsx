@@ -267,21 +267,34 @@ export default function PontoRapido() {
         return;
     }
 
+    // Se há um alerta de inconsistência, exibir apenas ele e notificar o gerente
+    if (showAlert) {
+        sonnerToast.error(
+            'Atenção: Inconsistência de Ponto',
+            { description: `${alertMessage} Por favor, verifique sua escala ou informe seu gerente.` }
+        );
+        if (employee) {
+          addNotification(
+            `Inconsistência de ponto para ${employee.name}: ${alertMessage}`,
+            'warning',
+            `/funcionarios?id=${employee.id}`
+          );
+        }
+    } else { // Se não há alerta de inconsistência, exibir o toast de sucesso
+        addRecord({
+          userId: selectedEmployeeId,
+          type: type,
+          timestamp: currentTime.toISOString(),
+        });
 
-    addRecord({
-      userId: selectedEmployeeId,
-      type: type,
-      timestamp: currentTime.toISOString(),
-    });
-
-    sonnerToast.success(
-      'Ponto registrado!',
-      {
-        description: `Registro de ${type} para ${employees.find(e => e.id === selectedEmployeeId)?.name} às ${format(currentTime, 'HH:mm:ss')}.`,
-        duration: 5000, // Manter visível por 5 segundos
-      }
-    );
-  }, [selectedEmployeeId, currentTime, records, employees, addRecord, getEffectiveWorkSchedule, parseWorkSchedule]);
+        sonnerToast.success(
+          'Ponto registrado!',
+          {
+            description: `Registro de ${type} para ${employees.find(e => e.id === selectedEmployeeId)?.name} às ${format(currentTime, 'HH:mm:ss')}.`,
+            duration: 5000,
+          }
+        );
+    }
 
 
   const getStatusText = useCallback(() => {
