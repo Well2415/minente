@@ -276,7 +276,10 @@ export default function PontoRapido() {
 
     sonnerToast.success(
       'Ponto registrado!',
-      { description: `Registro de ${type} para ${employees.find(e => e.id === selectedEmployeeId)?.name} às ${format(currentTime, 'HH:mm:ss')}.` }
+      {
+        description: `Registro de ${type} para ${employees.find(e => e.id === selectedEmployeeId)?.name} às ${format(currentTime, 'HH:mm:ss')}.`,
+        duration: 5000, // Manter visível por 5 segundos
+      }
     );
   }, [selectedEmployeeId, currentTime, records, employees, addRecord, getEffectiveWorkSchedule, parseWorkSchedule]);
 
