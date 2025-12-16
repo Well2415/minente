@@ -16,7 +16,7 @@ import {
 
 interface EmployeeFormProps {
   employee: User | null;
-  onSave: (employee: User) => void;
+  onSave?: (employee: User) => void;
   onClose: () => void;
 }
 
@@ -84,7 +84,7 @@ export default function EmployeeForm({ employee, onSave, onClose }: EmployeeForm
       workScheduleTemplateId: formData.workScheduleTemplateId || '', // Garantir que o template ID seja salvo
     };
     
-    onSave(userToSave);
+    onSave?.(userToSave);
   };
 
   return (
