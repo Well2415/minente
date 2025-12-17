@@ -366,6 +366,75 @@ app.delete('/api/timerecords/:id', async (req, res) => {
   }
 });
 
+// --- Notification Endpoints ---
+
+// POST a new notification
+app.post('/api/notificacoes', async (req, res) => {
+  const { userId, mensagem } = req.body;
+  if (!userId || !mensagem) {
+    return res.status(400).json({ error: 'ID do usuário e mensagem são obrigatórios para criar uma notificação' });
+  }
+
+  try {
+    const db = await dbPromise;
+    const id = uuidv4();
+    const timestamp = new Date().toISOString();
+    const result = await db.run(
+      'INSERT INTO notificacoes (id, userId, mensagem, timestamp, lida) VALUES (?, ?, ?, ?, ?)',
+      [id, userId, mensagem, timestamp, 0] // 0 for unread
+    );
+    res.status(201).json({ id, userId, mensagem, timestamp, lida: 0 });
+  } catch (error) {
+    console.error('Error creating notification:', error);
+    res.status(500).json({ error: 'Erro interno do servidor' });
+  }
+});
+
+// GET notifications for a specific user
+app.get('/api/notificacoes/:userId', async (req, res) => {
+  const userId = req.params.userId;
+  try {
+    const db = await dbPromise;
+    const notificacoes = await db.all('SELECT * FROM notificacoes WHERE userId = ? ORDER BY timestamp DESC', [userId]);
+    res.json(notificacoes);
+  } catch (error) {
+    console.error('Error fetching notifications:', error);
+    res.status(500).json({ error: 'Erro interno do servidor' });
+  }
+});
+
+// PUT (mark as read) a notification
+app.put('/api/notificacoes/:id/lida', async (req, res) => {
+  const notificationId = req.params.id;
+  try {
+    const db = await dbPromise;
+    const result = await db.run('UPDATE notificacoes SET lida = 1 WHERE id = ?', [notificationId]);
+    if (result.changes === 0) {
+      return res.status(404).json({ error: 'Notificação não encontrada' });
+    }
+    res.status(200).json({ message: 'Notificação marcada como lida' });
+  } catch (error) {
+    console.error('Error marking notification as read:', error);
+    res.status(500).json({ error: 'Erro interno do servidor' });
+  }
+});
+
+// DELETE a notification
+app.delete('/api/notificacoes/:id', async (req, res) => {
+  const notificationId = req.params.id;
+  try {
+    const db = await dbPromise;
+    const result = await db.run('DELETE FROM notificacoes WHERE id = ?', [notificationId]);
+    if (result.changes === 0) {
+      return res.status(404).json({ error: 'Notificação não encontrada' });
+    }
+    res.status(204).send(); // No content for successful deletion
+  } catch (error) {
+    console.error('Error deleting notification:', error);
+    res.status(500).json({ error: 'Erro interno do servidor' });
+  }
+});
+
 app.get('/api', (req, res) => {
   res.json({ message: 'Backend server is running!' });
 });

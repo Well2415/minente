@@ -1,8 +1,31 @@
+const sqlite3 = require('sqlite3').verbose();
+const { open } = require('sqlite');
+
+// Function to open the database connection
+async function openDb() {
+  return open({
+    filename: './ponto.db',
+    driver: sqlite3.Database
+  });
+}
+
+// Initialize the database and create tables if they don't exist
+async function initializeDatabase() {
+  const db = await openDb();
+  await db.exec('PRAGMA foreign_keys = OFF;');
+
+  const userTableExists = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='users';");
+  if (userTableExists) {
+    await db.exec('ALTER TABLE users RENAME TO usuarios;');
+  }
+
+  await db.exec(`
     CREATE TABLE IF NOT EXISTS usuarios (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       username TEXT NOT NULL UNIQUE,
       password TEXT NOT NULL
     );
+  `);
 
   const employeesTableExists = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='employees';");
   if (employeesTableExists) {
@@ -51,6 +74,17 @@
       timestamp TEXT NOT NULL,
       type TEXT NOT NULL,
       FOREIGN KEY (userId) REFERENCES funcionarios(id) ON DELETE CASCADE
+    );
+  `);
+
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS notificacoes (
+      id TEXT PRIMARY KEY,
+      userId INTEGER NOT NULL,
+      mensagem TEXT NOT NULL,
+      lida INTEGER DEFAULT 0,
+      timestamp TEXT NOT NULL,
+      FOREIGN KEY (userId) REFERENCES usuarios(id) ON DELETE CASCADE
     );
   `);
 
