@@ -1,420 +1,482 @@
-import { useState, useEffect, useCallback } from 'react';
-import { TimeRecord, WorkDay, Notification, User, WorkScheduleTemplate, ShiftSchedule } from '@/types';
-import { format, parseISO, differenceInMinutes, startOfDay, endOfDay, isWithinInterval, subDays } from 'date-fns';
-import { ptBR } from 'date-fns/locale'; // Importar ptBR aqui
-import { generateUUID } from '@/lib/utils';
-import { useNotifications } from './useNotifications';
-import { v4 as uuidv4 } from 'uuid'; // Adicionar importação de uuidv4
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { TimeRecord, WorkDay } from '@/types'; // REMOVIDO WorkScheduleTemplate, ShiftSchedule
+import { format, parseISO, differenceInMinutes, startOfDay, endOfDay, isWithinInterval, isBefore, setHours, setMinutes, subDays, isValid } from 'date-fns';
 
-export function useTimeRecords(currentUserId?: string) { // Renomeado para evitar conflito com userId nos parâmetros
-  const [records, setRecords] = useState<TimeRecord[]>([]);
+// import { sendNotification } from '@/lib/notificationService'; // Pode ser removido se não houver mais notificações de jornada
+import axios from 'axios'; // Adicionar importação do axios
+
+export function useTimeRecords(currentEmployeeId?: string | null) {
+  const [allRecords, setAllRecords] = useState<TimeRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [todayHours, setTodayHours] = useState(0);
   const [currentTime, setCurrentTime] = useState(new Date());
 
-  const [users, setUsers] = useState<User[]>([]);
-  const [workScheduleTemplates, setWorkScheduleTemplates] = useState<WorkScheduleTemplate[]>([]);
-  const [shiftSchedules, setShiftSchedules] = useState<ShiftSchedule[]>([]);
+  // Novos estados para dados do dashboard
+  const [dashboardWeeklyHours, setDashboardWeeklyHours] = useState(0);
+  const [dashboardMonthlyHours, setDashboardMonthlyHours] = useState(0);
+  const [dashboardMonthlyWorkDays, setDashboardMonthlyWorkDays] = useState(0);
+  const [dashboardWeeklyHoursPerDay, setDashboardWeeklyHoursPerDay] = useState<
+    { date: string; hours: number }[]
+  >([]);
 
-  const { addNotification } = useNotifications();
-
-  // Carrega usuários, templates e agendamentos do localStorage
-  useEffect(() => {
-    const storedUsers = JSON.parse(localStorage.getItem('users') || '[]');
-    setUsers(storedUsers);
-
-    const storedTemplates = JSON.parse(localStorage.getItem('workScheduleTemplates') || '[]');
-    setWorkScheduleTemplates(storedTemplates);
-
-    const storedSchedules = JSON.parse(localStorage.getItem('shiftSchedules') || '[]');
-    setShiftSchedules(storedSchedules);
-  }, []); // Executa apenas uma vez na montagem
-
-  // Funções auxiliares para calcular horas e intervalo de um WorkScheduleTemplate
-  const parseWorkSchedule = useCallback((scheduleString?: string) => {
-    let totalExpectedMinutes = 0;
-    let totalBreakMinutes = 0;
-
-    if (!scheduleString) {
-      return { totalExpectedMinutes, totalBreakMinutes };
-    }
-
-    const periods = scheduleString.split(',').map(p => p.trim());
-    for (const period of periods) {
-      const [startStr, endStr] = period.split('-');
-      if (startStr && endStr) {
-        const start = parseISO(`2000-01-01T${startStr}:00`);
-        const end = parseISO(`2000-01-01T${endStr}:00`);
-        totalExpectedMinutes += differenceInMinutes(end, start);
-      }
-    }
-    // Assumimos que a pausa é a diferença entre o final do primeiro período e o início do segundo, se houver
-    if (periods.length > 1) {
-      const firstPeriodEnd = periods[0].split('-')[1];
-      const secondPeriodStart = periods[1].split('-')[0];
-      if (firstPeriodEnd && secondPeriodStart) {
-        const breakStart = parseISO(`2000-01-01T${firstPeriodEnd}:00`);
-        const breakEnd = parseISO(`2000-01-01T${secondPeriodStart}:00`);
-        totalBreakMinutes = differenceInMinutes(breakEnd, breakStart);
-      }
-    }
-
-    return { totalExpectedMinutes, totalBreakMinutes };
-  }, []);
-
-  const getEffectiveWorkSchedule = useCallback((userId: string, date: Date) => {
-    const formattedDate = format(date, 'yyyy-MM-dd');
-    
-    // 1. Procurar em shiftSchedules para o dia específico
-    const specificShift = shiftSchedules.find(
-      s => s.userId === userId && s.date === formattedDate
-    );
-
-    if (specificShift) {
-      return workScheduleTemplates.find(t => t.id === specificShift.workScheduleTemplateId);
-    }
-
-    // 2. Se não houver shift específico, usar o template padrão do usuário
-    const user = users.find(u => u.id === userId);
-    if (user && user.workScheduleTemplateId) {
-      return workScheduleTemplates.find(t => t.id === user.workScheduleTemplateId);
-    }
-
-    // 3. Retornar um template padrão (ex: 8 horas padrão, sem sábado, domingo de descanso)
-    // Ou retornar null e lidar com isso downstream
-    return {
-      id: 'default',
-      name: 'Padrão (8h)',
-      workSchedule: '08:00-12:00, 13:00-17:00', // 8 horas
-      saturdayWorkSchedule: '',
-      weeklyRestDay: 'Sábado e Domingo',
-    } as WorkScheduleTemplate; // Retorna um objeto que se encaixa na interface
-  }, [users, workScheduleTemplates, shiftSchedules]);
-
-  // Remove a função antiga getEmployeeWorkSettings
-  // const getEmployeeWorkSettings = useCallback((employeeId: string) => { /* ... */ }, []);
-
-  const loadRecords = useCallback(() => {
+  // REMOVIDOS workScheduleTemplates e shiftSchedules
+  // const [workScheduleTemplates, setWorkScheduleTemplates] = useState<WorkScheduleTemplate[]>([]);
+  // const [shiftSchedules, setShiftSchedules] = useState<ShiftSchedule[]>([]);
+  
+  const refreshData = useCallback(async (startDate?: string, endDate?: string) => {
+    setLoading(true);
     try {
-      const allRecords = JSON.parse(localStorage.getItem('timeRecords') || '[]');
-      if (currentUserId) { // Usar currentUserId aqui
-        setRecords(allRecords.filter((r: TimeRecord) => r.userId === currentUserId));
-      } else {
-        setRecords(allRecords);
+      let timeRecordsEndpoint = '';
+      const params = new URLSearchParams();
+
+      if (currentEmployeeId === undefined) { // Manager/Admin context
+        timeRecordsEndpoint = '/api/timerecords';
+        // For managers, we want to fetch all records for the current period, so apply date filters
+        if (startDate && endDate) {
+            params.append('startDate', startDate);
+            params.append('endDate', endDate);
+        }
+      } else if (currentEmployeeId !== null) { // Specific user context
+        timeRecordsEndpoint = `/api/timerecords`; // Use the generic endpoint to pass userId as param
+        params.append('userId', currentEmployeeId);
+        if (startDate && endDate) {
+            params.append('startDate', startDate);
+            params.append('endDate', endDate);
+        }
+      } else { // currentEmployeeId is null (not logged in or invalid user)
+        setAllRecords([]);
+        setLoading(false);
+        // Clear dashboard states for non-logged-in users
+        setDashboardWeeklyHours(0);
+        setDashboardMonthlyHours(0);
+        setDashboardMonthlyWorkDays(0);
+        setDashboardWeeklyHoursPerDay([]);
+        return;
+      }
+      
+      const cacheBuster = `_=${new Date().getTime()}`;
+      
+      const recordsUrl = `${timeRecordsEndpoint}?${params.toString()}&${cacheBuster}`;
+
+      const fetches = [
+        axios.get(recordsUrl),
+        // REMOVIDO axios.get(`/api/work-schedule-templates?${cacheBuster}`),
+      ];
+
+      // Fetch dashboard data only for specific users (not managers viewing all)
+      if (currentEmployeeId && currentEmployeeId !== undefined) {
+        fetches.push(
+          axios.get(`/api/dashboard/total-hours-weekly?userId=${currentEmployeeId}&${cacheBuster}`),
+          axios.get(`/api/dashboard/total-hours-monthly?userId=${currentEmployeeId}&${cacheBuster}`),
+          axios.get(`/api/dashboard/total-days-worked-monthly?userId=${currentEmployeeId}&${cacheBuster}`),
+          axios.get(`/api/dashboard/hours-per-day-weekly?userId=${currentEmployeeId}&${cacheBuster}`)
+        );
+      }
+
+      const results = await Promise.all(fetches);
+
+      setAllRecords(results[0].data);
+      // setUsers(results[1].data); // Removido, pois users não é mais gerenciado aqui
+      // setWorkScheduleTemplates(results[1].data); // REMOVIDO
+      // setShiftSchedules([]); // REMOVIDO
+
+      // Process dashboard results if they were fetched
+      if (currentEmployeeId && currentEmployeeId !== undefined) {
+        let resultIndex = 1; // Ajustado de 2 para 1
+        setDashboardWeeklyHours(results[resultIndex++].data.totalHours);
+        setDashboardMonthlyHours(results[resultIndex++].data.totalHours);
+        setDashboardMonthlyWorkDays(results[resultIndex++].data.totalDays);
+        setDashboardWeeklyHoursPerDay(results[resultIndex++].data);
       }
     } catch (error) {
-      console.error("Failed to load records from localStorage", error);
-      setRecords([]);
+      console.error('Failed to fetch data from API:', error);
+      // Optionally clear dashboard states on error
+      setDashboardWeeklyHours(0);
+      setDashboardMonthlyHours(0);
+      setDashboardMonthlyWorkDays(0);
+      setDashboardWeeklyHoursPerDay([]);
     } finally {
       setLoading(false);
     }
-  }, [currentUserId]); // currentUserId como dependência
+  }, [currentEmployeeId]);
 
+  // Initial data fetch
   useEffect(() => {
-    loadRecords();
-  }, [loadRecords]);
+    refreshData();
+  }, [refreshData]);
 
+  // Periodic data refresh for real-time updates
   useEffect(() => {
-    const handleStorageChange = (event: StorageEvent) => {
-      if (event.key === 'timeRecords') {
-        loadRecords();
-      } else if (event.key === 'users') { // Monitorar mudanças em 'users'
-        setUsers(JSON.parse(event.newValue || '[]'));
-      } else if (event.key === 'workScheduleTemplates') { // Monitorar mudanças em 'workScheduleTemplates'
-        setWorkScheduleTemplates(JSON.parse(event.newValue || '[]'));
-      } else if (event.key === 'shiftSchedules') { // Monitorar mudanças em 'shiftSchedules'
-        setShiftSchedules(JSON.parse(event.newValue || '[]'));
-      }
-    };
-    window.addEventListener('storage', handleStorageChange);
-    return () => {
-      window.removeEventListener('storage', handleStorageChange);
-    };
-  }, [loadRecords]);
+    const intervalId = setInterval(() => {
+      refreshData();
+    }, 60000); // Refresh every 60 seconds
 
-  const addRecord = (record: Omit<TimeRecord, 'id'>) => {
-    const newRecord = {
-      ...record,
-      id: uuidv4(),
-    };
-    setRecords(prevRecords => [...prevRecords, newRecord]);
-    try {
-      const allRecords = JSON.parse(localStorage.getItem('timeRecords') || '[]');
-      allRecords.push(newRecord);
-      localStorage.setItem('timeRecords', JSON.stringify(allRecords));
-    } catch (error) {
-      console.error("Failed to save record to localStorage", error);
-      setRecords(prevRecords => prevRecords.filter(r => r.id !== newRecord.id));
+    return () => clearInterval(intervalId); // Cleanup on unmount
+  }, [refreshData]);
+  
+  const records = useMemo(() => {
+    if (currentEmployeeId === null) { // Se currentEmployeeId é null (usuário não logado)
+      return []; // Retorna array vazio
     }
-    return newRecord;
+    if (currentEmployeeId === undefined) { // Se currentEmployeeId é undefined (gerente)
+      return allRecords; // Retorna todos os registros para gerentes
+    }
+    // Funcionário específico logado
+    return allRecords.filter(r => r.userId === parseInt(currentEmployeeId, 10)); // Converter currentEmployeeId para número
+  }, [allRecords, currentEmployeeId]);
+
+
+
+interface NewTimeRecordInput {
+  employeeId: string;
+  type: 'clock-in' | 'clock-out' | 'break-start' | 'break-end';
+  timestamp: string;
+  location?: string;
+}
+
+const addRecord = async (record: NewTimeRecordInput) => {
+    try {
+      const response = await axios.post('/api/timerecords', {
+        employeeId: record.employeeId,
+        type: record.type,
+        timestamp: record.timestamp,
+        location: record.location,
+      });
+      const newRecord = response.data; // Backend returns the created record with ID
+      // if (newRecord.type === 'clock-in') {
+      //   checkAndNotifyForIrregularClockIn(newRecord); // Desabilitado temporariamente
+      // }
+      refreshData(); // Refresh all records from backend
+      return newRecord;
+    } catch (error) {
+      console.error('Failed to add time record:', error);
+      // Adicionar log detalhado do erro para depuração
+      if (axios.isAxiosError(error)) {
+        console.error('Axios Error Details:', {
+          message: error.message,
+          code: error.code,
+          response: error.response?.data,
+          status: error.response?.status,
+          headers: error.response?.headers,
+        });
+      } else {
+        console.error('General Error Details:', error);
+      }
+      throw error; // Re-throw for component to handle
+    }
   };
 
-  const getTodayRecords = useCallback((targetUserId?: string) => {
-    const today = format(new Date(), 'yyyy-MM-dd');
-    const uid = targetUserId || currentUserId; // Usar currentUserId
-    if (!uid) return [];
-    return records.filter(
-      (r) => r.userId === uid && r.timestamp.startsWith(today)
-    );
-  }, [records, currentUserId]);
+  const updateRecord = async (record: TimeRecord) => {
+    try {
+      const response = await axios.put(`/api/timerecords/${record.id}`, record);
+      refreshData(); // Refresh all records from backend
+      return response.data;
+    } catch (error) {
+      console.error('Failed to update time record:', error);
+      throw error;
+    }
+  };
 
-  const getLastRecord = useCallback((targetUserId?: string) => {
+  const deleteRecord = async (id: string) => {
+    try {
+      await axios.delete(`/api/timerecords/${id}`);
+      refreshData(); // Refresh all records from backend
+    } catch (error) {
+      console.error('Failed to delete time record:', error);
+      throw error;
+    }
+  };
+  
+  const getTodayRecords = useCallback((targetUserId?: string | null) => {
+    const today = format(new Date(), 'yyyy-MM-dd');
+    const uid = targetUserId !== undefined ? targetUserId : currentEmployeeId; // Usa targetUserId se fornecido, senão currentEmployeeId
+    
+    if (uid === null) { // Se nenhum usuário válido (não é gerente, e não tem ID)
+        return [];
+    }
+    const recordsToFilter = uid === undefined // Se uid é undefined (gerente)
+        ? allRecords // Todos os registros
+        : allRecords.filter(r => r.userId === parseInt(uid, 10)); // Converter uid para número
+    
+    return recordsToFilter.filter(
+      (r) => r.timestamp.startsWith(today)
+    );
+  }, [allRecords, currentEmployeeId]);
+
+  const getLastRecord = useCallback((targetUserId?: string | null) => {
     const todayRecords = getTodayRecords(targetUserId);
     return todayRecords.length > 0 ? todayRecords[todayRecords.length - 1] : null;
   }, [getTodayRecords]);
 
-  const calculateDayHours = useCallback((dayRecords: TimeRecord[]): number => {
-    let totalMinutes = 0;
-    const sorted = [...dayRecords].sort(
-      (a, b) => parseISO(a.timestamp).getTime() - parseISO(b.timestamp).getTime()
+  const calculateDayHours = useCallback((dayRecords: TimeRecord[], isCurrentDay: boolean = false): number => {
+    if (!dayRecords || dayRecords.length === 0) {
+      return 0;
+    }
+
+    const sortedRecords = [...dayRecords].sort(
+      (a, b) => {
+        const dateA = parseISO(a.timestamp);
+        const dateB = parseISO(b.timestamp);
+        
+        if (!isValid(dateA)) {
+            // console.warn(`Invalid date found in record A: ${a.timestamp}`);
+            return -1;
+        }
+        if (!isValid(dateB)) {
+            // console.warn(`Invalid date found in record B: ${b.timestamp}`);
+            return 1;
+        }
+        return dateA.getTime() - dateB.getTime();
+      }
     );
 
-    let clockInTime: Date | null = null;
-    let breakStartTime: Date | null = null;
+    const workIntervals: { start: Date; end: Date }[] = [];
+    const breakIntervals: { start: Date; end: Date }[] = [];
 
-    for (const record of sorted) {
-      const time = parseISO(record.timestamp);
+    let currentClockIn: Date | null = null;
+    let currentBreakStart: Date | null = null;
+
+    for (const record of sortedRecords) {
+      const recordTime = parseISO(record.timestamp);
+      // Further debug: check if recordTime is valid
+      if (!isValid(recordTime)) {
+        // console.error(`Skipping invalid recordTime from timestamp: ${record.timestamp}`);
+        continue; // Skip this record if its timestamp is invalid
+      }
+      // console.log(`Processing record: ${record.type}, Timestamp: ${record.timestamp}, Parsed Date: ${recordTime}`);
+
       switch (record.type) {
         case 'clock-in':
-          clockInTime = time;
+          // If already clocked in, this is a new clock-in. Close any previous open work/break.
+          if (currentClockIn) {
+            workIntervals.push({ start: currentClockIn, end: recordTime });
+          } else if (currentBreakStart) {
+            // If on break, close break before starting work again
+            breakIntervals.push({ start: currentBreakStart, end: recordTime });
+            currentBreakStart = null;
+          }
+          currentClockIn = recordTime;
           break;
+
         case 'clock-out':
-          if (clockInTime) {
-            totalMinutes += differenceInMinutes(time, clockInTime);
-            clockInTime = null;
+          if (currentClockIn) {
+            if (currentBreakStart) {
+              // If on break, close break before clocking out
+              breakIntervals.push({ start: currentBreakStart, end: recordTime });
+              currentBreakStart = null;
+            }
+            workIntervals.push({ start: currentClockIn, end: recordTime });
+            currentClockIn = null;
           }
           break;
+
         case 'break-start':
-          if (clockInTime) {
-            totalMinutes += differenceInMinutes(time, clockInTime);
-            clockInTime = null;
-            breakStartTime = time;
+          if (currentClockIn) { // If working, close work period and start break
+            workIntervals.push({ start: currentClockIn, end: recordTime });
+            currentClockIn = null;
+            currentBreakStart = recordTime;
+          } else if (currentBreakStart) {
+            // Already on break, just update break start (error in sequence, but handle gracefully)
+            breakIntervals.push({ start: currentBreakStart, end: recordTime }); // Close previous break
+            currentBreakStart = recordTime; // Start new break
           }
           break;
+
         case 'break-end':
-          if (breakStartTime) {
-            clockInTime = time;
-            breakStartTime = null;
+          if (currentBreakStart) { // If on break, close break and resume work
+            breakIntervals.push({ start: currentBreakStart, end: recordTime });
+            currentBreakStart = null;
+            currentClockIn = recordTime; // Resume work from break end
           }
           break;
       }
     }
 
-    if (clockInTime) {
-      totalMinutes += differenceInMinutes(new Date(), clockInTime);
-    }
-
-    return Math.round((totalMinutes / 60) * 100) / 100;
-  }, []);
-
-  const getWorkDays = useCallback((
-    startDate: Date,
-    endDate: Date,
-    targetUserId?: string
-  ): WorkDay[] => {
-    const uid = targetUserId || currentUserId;
-    if (!uid) return [];
-
-    const filteredRecords = records.filter((r) => {
-      if (r.userId !== uid) return false;
-      const recordDate = parseISO(r.timestamp);
-      return isWithinInterval(recordDate, { start: startOfDay(startDate), end: endOfDay(endDate) });
-    });
-
-    const groupedByDate: { [key: string]: TimeRecord[] } = {};
-    filteredRecords.forEach((r) => {
-      const date = format(parseISO(r.timestamp), 'yyyy-MM-dd');
-      if (!groupedByDate[date]) {
-        groupedByDate[date] = [];
+    // Handle open intervals for the current day
+    if (isCurrentDay) {
+      const now = new Date();
+      if (currentClockIn && isValid(currentClockIn)) { // Check validity
+        workIntervals.push({ start: currentClockIn, end: now });
+      } else if (currentBreakStart && isValid(currentBreakStart)) { // Check validity
+        breakIntervals.push({ start: currentBreakStart, end: now });
       }
-      groupedByDate[date].push(r);
-    });
-
-    // Criar uma lista completa de dias no período
-    const allDatesInPeriod: Date[] = [];
-    let currentDate = startOfDay(startDate);
-    const lastDate = endOfDay(endDate);
-    while (currentDate <= lastDate) {
-      allDatesInPeriod.push(currentDate);
-      currentDate = new Date(currentDate.setDate(currentDate.getDate() + 1));
     }
-
-
-    return allDatesInPeriod.map(date => {
-      const formattedDate = format(date, 'yyyy-MM-dd');
-      const dayRecords = groupedByDate[formattedDate] || [];
-      const totalHours = calculateDayHours(dayRecords);
-      const hasClockOut = dayRecords.some((r) => r.type === 'clock-out');
-      
-      const effectiveSchedule = getEffectiveWorkSchedule(uid, date);
-      const { totalExpectedMinutes } = parseWorkSchedule(effectiveSchedule?.workSchedule);
-      const requiredHours = totalExpectedMinutes / 60; // Converter para horas
-
-      let status: 'complete' | 'incomplete' | 'absent' = 'absent';
-
-      if (totalHours > 0) {
-        if (hasClockOut && totalHours >= requiredHours) {
-          status = 'complete';
-        } else if (hasClockOut && totalHours < requiredHours) {
-          status = 'incomplete';
-        } else if (!hasClockOut) { // Usuário está logado e trabalhando
-          status = 'incomplete'; 
-        }
-      } else { // totalHours === 0
-        // Verificar se é um dia de descanso
-        const dayOfWeek = format(date, 'EEEE', { locale: ptBR });
-        const isRestDay = effectiveSchedule?.weeklyRestDay?.includes(dayOfWeek);
-
-        if (isRestDay) {
-          status = 'complete'; // Se é dia de descanso, conta como completo (não precisa trabalhar)
+    
+    // Calculate total work minutes
+    let grossWorkMinutes = 0;
+    workIntervals.forEach(interval => {
+        if (isValid(interval.start) && isValid(interval.end)) { // Check validity
+            grossWorkMinutes += differenceInMinutes(interval.end, interval.start);
         } else {
-          status = 'absent'; // Se não trabalhou e não é dia de descanso
+            // console.warn('Skipping invalid work interval:', interval);
         }
-      }
-
-
-      return {
-        date: formattedDate,
-        userId: uid,
-        records: dayRecords,
-        totalHours,
-        status: status,
-      };
     });
-  }, [records, currentUserId, calculateDayHours, getEffectiveWorkSchedule, parseWorkSchedule]);
+
+    let totalBreakDuration = 0;
+    breakIntervals.forEach(interval => {
+        if (isValid(interval.start) && isValid(interval.end)) { // Check validity
+            totalBreakDuration += differenceInMinutes(interval.end, interval.start);
+        } else {
+            // console.warn('Skipping invalid break interval:', interval);
+        }
+    });
+
+    // The actual worked minutes are gross work minutes minus breaks that occurred during work intervals.
+    // This refined logic is needed because breaks might not perfectly align.
+    // For simplicity, let's assume valid break entries are always inside a work interval.
+    // A more complex overlap calculation would be needed for absolute precision.
+
+    // Given the previous state-based interval generation, this should be accurate
+    // as breaks close work intervals and vice-versa.
+    const netMinutes = grossWorkMinutes - totalBreakDuration; // This is the simplified approach
+    
+    return Math.max(0, netMinutes / 60); // Return hours
+  }, []);
 
   // Effect para atualizar currentTime e todayHours every second
   useEffect(() => {
     const timer = setInterval(() => {
-      setCurrentTime(new Date());
+      const newTime = new Date();
+      setCurrentTime(newTime);
       const todayUserRecords = getTodayRecords();
-      setTodayHours(calculateDayHours(todayUserRecords));
+      const calculatedHours = calculateDayHours(todayUserRecords, true);
+      setTodayHours(calculatedHours); 
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [records, currentUserId, getTodayRecords, calculateDayHours]);
+  }, [allRecords, currentEmployeeId, getTodayRecords, calculateDayHours]); // Depend on allRecords
 
-  // Effect para verificar ponto incompleto do dia anterior
-  useEffect(() => {
-    if (!currentUserId) return;
+  const getWorkDays = useCallback((startDate: Date, endDate: Date, targetUserId?: string | null) => {
+    const uid = targetUserId !== undefined ? targetUserId : currentEmployeeId; // Usa targetUserId se fornecido, senão currentEmployeeId
 
-    const yesterday = subDays(new Date(), 1);
-    const yesterdayDateStr = format(yesterday, 'yyyy-MM-dd');
-
-    const workDays = getWorkDays(yesterday, yesterday, currentUserId);
-    const yesterdayWorkDay = workDays.find(wd => wd.date === yesterdayDateStr);
-
-    if (yesterdayWorkDay && yesterdayWorkDay.status === 'incomplete' && !yesterdayWorkDay.records.some(r => r.type === 'clock-out')) {
-      const existingNotifications = JSON.parse(localStorage.getItem('notifications') || '[]');
-      const notificationExists = existingNotifications.some((notif: Notification) => 
-        notif.message.includes('Ponto incompleto referente ao dia') && notif.message.includes(yesterdayDateStr) && !notif.read
-      );
-
-      if (!notificationExists) {
-        addNotification(
-          `Ponto incompleto referente ao dia ${format(yesterday, 'dd/MM/yyyy')}. Você esqueceu de registrar a saída.`,
-          'warning',
-          '/ponto'
-        );
-      }
+    if (uid === null) { // Se nenhum usuário válido (não é gerente, e não tem ID)
+      return [];
     }
-  }, [currentUserId, records, addNotification, getWorkDays]);
+    const userRecords = uid === undefined // Se uid é undefined (gerente)
+      ? allRecords
+      : allRecords.filter(r => r.userId === parseInt(uid, 10)); // Converter uid para número
 
-  // Effect to handle auto clock-out
-  useEffect(() => {
-    if (!currentUserId) return;
+    const daysMap = new Map<string, { date: Date; totalHours: number; records: TimeRecord[] }>();
 
-    const autoClockOutInterval = setInterval(() => {
-      const todayDate = new Date();
-      const effectiveSchedule = getEffectiveWorkSchedule(currentUserId, todayDate);
-      
-      // A lógica de autoClockOut não está mais ligada a employeeSettings
-      // Precisamos determinar se o autoClockOut é desejado para o usuário
-      // Por simplicidade, assumimos que 'employeeSettings' ainda pode guardar essa flag.
-      const allEmployeeSettings = JSON.parse(localStorage.getItem('employeeSettings') || '{}');
-      const employeeSettings = allEmployeeSettings[currentUserId] || { autoClockOut: false };
-      const userAutoClockOut = employeeSettings.autoClockOut;
-
-
-      if (userAutoClockOut && effectiveSchedule) {
-        const { totalExpectedMinutes } = parseWorkSchedule(effectiveSchedule.workSchedule);
-        const requiredHours = totalExpectedMinutes / 60;
-
-        const lastRec = getLastRecord(currentUserId);
-        const currentTodayRecords = getTodayRecords(currentUserId);
-        const currentTodayHours = calculateDayHours(currentTodayRecords);
-
-        if (
-          currentTodayRecords.some(r => r.type === 'clock-in') &&
-          lastRec &&
-          (lastRec.type === 'clock-in' || lastRec.type === 'break-end') &&
-          currentTodayHours >= requiredHours
-        ) {
-          setTimeout(() => {
-            const recheckLastRec = getLastRecord(currentUserId);
-            const recheckCurrentTodayRecords = getTodayRecords(currentUserId);
-            const recheckCurrentTodayHours = calculateDayHours(recheckCurrentTodayRecords);
-            
-            // Re-checar userAutoClockOut e requiredHours
-            const recheckEmployeeSettings = JSON.parse(localStorage.getItem('employeeSettings') || '{}');
-            const recheckUserAutoClockOut = (recheckEmployeeSettings[currentUserId] || { autoClockOut: false }).autoClockOut;
-            const recheckEffectiveSchedule = getEffectiveWorkSchedule(currentUserId, new Date());
-            const recheckRequiredHours = recheckEffectiveSchedule ? parseWorkSchedule(recheckEffectiveSchedule.workSchedule).totalExpectedMinutes / 60 : 0;
-
-
-            if (
-              recheckUserAutoClockOut &&
-              recheckLastRec &&
-              (recheckLastRec.type === 'clock-in' || recheckLastRec.type === 'break-end') &&
-              recheckCurrentTodayHours >= recheckRequiredHours &&
-              !recheckCurrentTodayRecords.some(r => r.type === 'clock-out')
-            ) {
-                 addRecord({
-                    userId: currentUserId,
-                    type: 'clock-out',
-                    timestamp: new Date().toISOString(),
-                });
-                console.log(`Auto clock-out registered for user ${currentUserId} at ${new Date().toLocaleTimeString()}`);
-            }
-          }, 1000 * 30);
+    userRecords.forEach(record => {
+      const recordDate = parseISO(record.timestamp);
+      if (isWithinInterval(recordDate, { start: startDate, end: endDate })) {
+        const dayKey = format(recordDate, 'yyyy-MM-dd');
+        if (!daysMap.has(dayKey)) {
+          daysMap.set(dayKey, { date: startOfDay(recordDate), totalHours: 0, records: [] });
         }
+        daysMap.get(dayKey)!.records.push(record);
       }
-    }, 1000 * 60 * 5);
+    });
 
-    return () => clearInterval(autoClockOutInterval);
-  }, [currentUserId, addRecord, calculateDayHours, getTodayRecords, getLastRecord, getEffectiveWorkSchedule, parseWorkSchedule]);
+    const workDays: WorkDay[] = Array.from(daysMap.values()).map(dayEntry => ({
+      date: dayEntry.date,
+      records: dayEntry.records,
+      totalHours: calculateDayHours(dayEntry.records, format(dayEntry.date, 'yyyy-MM-dd') === format(new Date(), 'yyyy-MM-dd')),
+    }));
 
-  const getAllEmployeesSummary = useCallback((startDate: Date, endDate: Date) => {
-    // Usar a lista 'users' gerenciada pelo hook
-    return users
-      .filter((u: User) => u.role === 'employee')
-      .map((user: User) => {
-        const workDays = getWorkDays(startDate, endDate, user.id);
-        const totalHours = workDays.reduce((sum, day) => sum + day.totalHours, 0);
-        const daysWorked = workDays.filter((d) => d.totalHours > 0).length;
+    return workDays.sort((a, b) => a.date.getTime() - b.date.getTime());
+  }, [allRecords, calculateDayHours, currentEmployeeId]);
 
-        return {
-          user,
-          totalHours: Math.round(totalHours * 100) / 100,
-          daysWorked,
-          averageHoursPerDay: daysWorked > 0 ? Math.round((totalHours / daysWorked) * 100) / 100 : 0,
+  // REMOVIDO: getEffectiveWorkSchedule, pois não temos mais workScheduleTemplates ou shiftSchedules
+  // const getEffectiveWorkSchedule = useCallback((date: Date, userId: string) => {
+  //   const dateString = format(date, 'yyyy-MM-dd');
+    
+  //   // 1. Find a specific shift schedule for the user and date
+  //   const shift = shiftSchedules.find(s => s.userId === userId && s.date === dateString);
+  //   if (shift) {
+  //     return workScheduleTemplates.find(t => t.id === shift.workScheduleTemplateId) || null;
+  //   }
+
+  //   // 2. Fallback to the user's default work schedule (needs user data)
+  //   // This part is tricky as useTimeRecords doesn't have all users' data.
+  //   // For now, we'll assume a default or that this logic will be expanded.
+  //   // Let's assume we can't determine a default here and return null if no shift is found.
+  //   return null;
+  // }, [shiftSchedules, workScheduleTemplates]);
+
+  const getAllEmployeesSummary = useCallback(async (startDate: Date, endDate: Date, selectedEmployeeId?: string) => {
+    try {
+      let employees: any[] = [];
+      if (selectedEmployeeId && selectedEmployeeId !== 'all') {
+        const employeeResponse = await axios.get(`/api/employees/${selectedEmployeeId}`);
+        employees = [employeeResponse.data];
+      } else {
+        const employeesResponse = await axios.get('/api/employees');
+        employees = employeesResponse.data;
+      }
+      console.log('getAllEmployeesSummary: Funcionários da API /api/employees:', employees); // Log 1
+
+      const summaryPromises = employees.map(async (employee: any) => {
+        const employeeRecordsResponse = await axios.get('/api/timerecords', {
+          params: {
+            userId: employee.id, // O backend espera o ID do funcionário aqui
+            startDate: startDate.toISOString(),
+            endDate: endDate.toISOString(),
+          },
+        });
+        const employeeRecords = employeeRecordsResponse.data;
+        console.log(`getAllEmployeesSummary: Registros de ponto para ${employee.name}:`, employeeRecords); // Log 2
+
+        // Calculate total hours and days worked for the period
+        const recordsByDay = employeeRecords.reduce((acc: any, record: TimeRecord) => {
+          const date = format(parseISO(record.timestamp), 'yyyy-MM-dd');
+          if (!acc[date]) acc[date] = [];
+          acc[date].push(record);
+          return acc;
+        }, {});
+
+        let totalHours = 0;
+        let daysWorked = 0;
+
+        // Itera sobre as datas para calcular horas e dias trabalhados
+        // Somente conta dias como 'trabalhados' se houver horas calculadas para aquele dia.
+        for (const dateKey in recordsByDay) {
+          const dailyHours = calculateDayHours(recordsByDay[dateKey]);
+          if (dailyHours > 0) {
+            totalHours += dailyHours;
+            daysWorked++; // Conta apenas se trabalhou horas naquele dia
+          }
+        }
+
+        const employeeSummary = {
+          user: employee,
+          totalHours: parseFloat(totalHours.toFixed(2)),
+          daysWorked: daysWorked,
         };
+        console.log(`getAllEmployeesSummary: Resumo para ${employee.name}:`, employeeSummary); // Log 3
+        return employeeSummary;
       });
-  }, [users, records, getWorkDays]); // Adicionar 'users' e 'records' como dependências
+
+      const finalSummary = await Promise.all(summaryPromises);
+      console.log('getAllEmployeesSummary: Resumo final:', finalSummary); // Log 4
+      return finalSummary;
+    } catch (error) {
+      console.error('Error fetching all employees summary:', error);
+      return [];
+    }
+  }, [calculateDayHours]);
+
 
   return {
     records,
     loading,
     addRecord,
+    updateRecord,
+    deleteRecord,
     getTodayRecords,
     getLastRecord,
     calculateDayHours,
-    getWorkDays,
-    getAllEmployeesSummary,
-    reload: loadRecords,
     todayHours,
-    currentTime,
-    getEffectiveWorkSchedule, // Expor a nova função
-    parseWorkSchedule, // Expor a nova função
+    getWorkDays,
+    // REMOVIDO: workScheduleTemplates,
+    // REMOVIDO: shiftSchedules,
+    // REMOVIDO: getEffectiveWorkSchedule,
+    refreshData,
+    dashboardWeeklyHours,
+    dashboardMonthlyHours,
+    dashboardMonthlyWorkDays,
+    dashboardWeeklyHoursPerDay,
+    getAllEmployeesSummary,
   };
 }

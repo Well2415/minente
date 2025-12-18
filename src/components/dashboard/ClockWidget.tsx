@@ -1,13 +1,15 @@
 import { useAuth } from '@/contexts/AuthContext';
-import { useTimeRecords } from '@/hooks/useTimeRecords';
+import { useSharedTimeRecords } from '@/contexts/TimeRecordsContext';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Play, Square, Coffee, Clock } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { useToast } from '@/hooks/use-toast';
+import { useToast } from "@/components/ui/use-toast";
 import { formatHoursDecimal } from '@/lib/utils';
+import axios, { AxiosError } from 'axios'; // Adicionar AxiosError
+
 
 export function ClockWidget() {
   const { user } = useAuth();
@@ -15,15 +17,17 @@ export function ClockWidget() {
     addRecord,
     getLastRecord,
     getTodayRecords,
-    currentTime,
+    currentTime = new Date(),
     todayHours,
-  } = useTimeRecords(user?.id);
+  } = useSharedTimeRecords();
   const { toast } = useToast();
+
+  // Removido o estado saldoHoras
 
   const lastRecord = getLastRecord();
   const todayRecords = getTodayRecords();
 
-  const getStatus = () => {
+  const getStatus = () => { // <--- DEFINIÇÃO CORRETA DA FUNÇÃO
     if (!lastRecord) return 'not-started';
     switch (lastRecord.type) {
       case 'clock-in':
@@ -37,88 +41,151 @@ export function ClockWidget() {
       default:
         return 'not-started';
     }
-  };
+  }; // <--- FIM DA FUNÇÃO
 
-  const status = getStatus();
+  const status = getStatus(); // <--- CHAMADA DA FUNÇÃO AQUI
 
-  const handleClockIn = () => {
-    if (!user) {
+  // Removido o Effect para calcular saldo de horas
+
+
+  const handleClockIn = async () => {
+    if (!user || !user.employeeId) { // Adicionar verificação para employeeId
       toast({
         title: 'Erro de autenticação',
-        description: 'Usuário não encontrado. Faça login novamente.',
+        description: 'Usuário não vinculado a um funcionário. Faça login novamente ou contate o administrador.',
         variant: 'destructive',
       });
       return;
     }
-    addRecord({
-      userId: user.id,
-      type: 'clock-in',
-      timestamp: new Date().toISOString(),
-    });
-    toast({
-      title: 'Entrada registrada!',
-      description: `Você iniciou sua jornada às ${format(new Date(), 'HH:mm')}`,
-    });
+    try {
+      await addRecord({
+        employeeId: user.employeeId, // Alterado de userId para employeeId
+        type: 'clock-in',
+        timestamp: new Date().toISOString(),
+      });
+      toast({
+        title: 'Entrada registrada!',
+        description: `Você iniciou sua jornada às ${format(new Date(), 'HH:mm')}`,
+      });
+    } catch (error) {
+      let descriptionMessage = 'Não foi possível registrar sua entrada. Tente novamente.';
+      if (axios.isAxiosError(error) && error.response?.data?.error === 'Funcionário não encontrado.') { // Removido status 404, pois agora o erro pode ser outro
+        descriptionMessage = 'Seu usuário não está vinculado a um funcionário (verificação de employeeId falhou no backend). Por favor, entre em contato com o administrador.';
+      } else if (axios.isAxiosError(error) && error.response?.data?.error) {
+        descriptionMessage = error.response.data.error; // Exibir mensagem de erro do backend
+      }
+      toast({
+        title: 'Erro ao registrar entrada',
+        description: descriptionMessage,
+        variant: 'destructive',
+      });
+      console.error('Erro ao registrar entrada:', error);
+    }
   };
 
-  const handleClockOut = () => {
-    if (!user) {
+  const handleClockOut = async () => {
+    if (!user || !user.employeeId) { // Adicionar verificação para employeeId
       toast({
         title: 'Erro de autenticação',
-        description: 'Usuário não encontrado. Faça login novamente.',
+        description: 'Usuário não vinculado a um funcionário. Faça login novamente ou contate o administrador.',
         variant: 'destructive',
       });
       return;
     }
-    addRecord({
-      userId: user.id,
-      type: 'clock-out',
-      timestamp: new Date().toISOString(),
-    });
-    toast({
-      title: 'Saída registrada!',
-      description: `Você encerrou sua jornada às ${format(new Date(), 'HH:mm')}`,
-    });
+    try {
+      await addRecord({
+        employeeId: user.employeeId, // Alterado de userId para employeeId
+        type: 'clock-out',
+        timestamp: new Date().toISOString(),
+      });
+      toast({
+        title: 'Saída registrada!',
+        description: `Você encerrou sua jornada às ${format(new Date(), 'HH:mm')}`,
+      });
+    } catch (error) {
+      let descriptionMessage = 'Não foi possível registrar sua saída. Tente novamente.';
+      if (axios.isAxiosError(error) && error.response?.data?.error === 'Funcionário não encontrado.') {
+        descriptionMessage = 'Seu usuário não está vinculado a um funcionário (verificação de employeeId falhou no backend). Por favor, entre em contato com o administrador.';
+      } else if (axios.isAxiosError(error) && error.response?.data?.error) {
+        descriptionMessage = error.response.data.error;
+      }
+      toast({
+        title: 'Erro ao registrar saída',
+        description: descriptionMessage,
+        variant: 'destructive',
+      });
+      console.error('Erro ao registrar saída:', error);
+    }
   };
 
-  const handleBreakStart = () => {
-    if (!user) {
+  const handleBreakStart = async () => {
+    if (!user || !user.employeeId) { // Adicionar verificação para employeeId
       toast({
         title: 'Erro de autenticação',
-        description: 'Usuário não encontrado. Faça login novamente.',
+        description: 'Usuário não vinculado a um funcionário. Faça login novamente ou contate o administrador.',
         variant: 'destructive',
       });
       return;
     }
-    addRecord({
-      userId: user.id,
-      type: 'break-start',
-      timestamp: new Date().toISOString(),
-    });
-    toast({
-      title: 'Pausa iniciada!',
-      description: 'Aproveite seu descanso.',
-    });
+    try {
+      await addRecord({
+        employeeId: user.employeeId, // Alterado de userId para employeeId
+        type: 'break-start',
+        timestamp: new Date().toISOString(),
+      });
+      toast({
+        title: 'Pausa iniciada!',
+        description: 'Aproveite seu descanso.',
+      });
+    } catch (error) {
+      let descriptionMessage = 'Não foi possível iniciar sua pausa. Tente novamente.';
+      if (axios.isAxiosError(error) && error.response?.data?.error === 'Funcionário não encontrado.') {
+        descriptionMessage = 'Seu usuário não está vinculado a um funcionário (verificação de employeeId falhou no backend). Por favor, entre em contato com o administrador.';
+      } else if (axios.isAxiosError(error) && error.response?.data?.error) {
+        descriptionMessage = error.response.data.error;
+      }
+      toast({
+        title: 'Erro ao iniciar pausa',
+        description: descriptionMessage,
+        variant: 'destructive',
+      });
+      console.error('Erro ao iniciar pausa:', error);
+    }
   };
 
-  const handleBreakEnd = () => {
-    if (!user) {
+  const handleBreakEnd = async () => {
+    if (!user || !user.employeeId) { // Adicionar verificação para employeeId
       toast({
         title: 'Erro de autenticação',
-        description: 'Usuário não encontrado. Faça login novamente.',
+        description: 'Usuário não vinculado a um funcionário. Faça login novamente ou contate o administrador.',
         variant: 'destructive',
       });
       return;
     }
-    addRecord({
-      userId: user.id,
-      type: 'break-end',
-      timestamp: new Date().toISOString(),
-    });
-    toast({
-      title: 'Pausa encerrada!',
-      description: 'Bem-vindo de volta ao trabalho!',
-    });
+    try {
+      await addRecord({
+        employeeId: user.employeeId, // Alterado de userId para employeeId
+        type: 'break-end',
+        timestamp: new Date().toISOString(),
+      });
+      toast({
+        title: 'Pausa encerrada!',
+        description: 'Bem-vindo de volta ao trabalho!',
+      });
+    } catch (error) {
+      let descriptionMessage = 'Não foi possível encerrar sua pausa. Tente novamente.';
+      if (axios.isAxiosError(error) && error.response?.data?.error === 'Funcionário não encontrado.') {
+        descriptionMessage = 'Seu usuário não está vinculado a um funcionário (verificação de employeeId falhou no backend). Por favor, entre em contato com o administrador.';
+      } else if (axios.isAxiosError(error) && error.response?.data?.error) {
+        descriptionMessage = error.response.data.error;
+      }
+      toast({
+        title: 'Erro ao encerrar pausa',
+        description: descriptionMessage,
+        variant: 'destructive',
+      });
+      console.error('Erro ao encerrar pausa:', error);
+    }
   };
 
   const statusConfig = {
@@ -154,13 +221,13 @@ export function ClockWidget() {
             {statusConfig[status].label}
           </Badge>
         </div>
-        
+
         <div className="text-center">
           <p className="text-5xl font-display font-bold tracking-tight">
-            {format(currentTime, 'HH:mm:ss')}
+            {currentTime instanceof Date && !isNaN(currentTime.getTime()) ? format(currentTime, 'HH:mm:ss') : '--:--:--'}
           </p>
           <p className="text-primary-foreground/80 mt-1">
-            {format(currentTime, "EEEE, d 'de' MMMM", { locale: ptBR })}
+            {currentTime instanceof Date && !isNaN(currentTime.getTime()) ? format(currentTime, "EEEE, d 'de' MMMM", { locale: ptBR }) : 'Data Inválida'}
           </p>
         </div>
       </div>
@@ -176,6 +243,8 @@ export function ClockWidget() {
             <p className="text-2xl font-display font-bold">{todayRecords.length}</p>
           </div>
         </div>
+        
+        {/* Removido o elemento para exibir o Saldo de Horas */}
 
         <div className="grid grid-cols-2 gap-3">
           {status === 'not-started' || status === 'finished' ? (
@@ -222,3 +291,4 @@ export function ClockWidget() {
     </Card>
   );
 }
+

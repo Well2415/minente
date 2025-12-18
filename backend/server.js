@@ -1,15 +1,30 @@
 const express = require('express');
 const cors = require('cors');
 const dbPromise = require('./database');
-
+const { v4: uuidv4 } = require('uuid');
 
 const app = express();
 const PORT = 3001;
 
-app.use(cors());
+app.use(cors({
+  origin: ['http://localhost:8080', 'http://localhost:3001'],
+  methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
+  credentials: true,
+  optionsSuccessStatus: 204
+}));
 app.use(express.json());
 
-// User creation endpoint
+// Removidas as funções parseSchedule e isTimeWithinIntervals
+
+async function createNotification(db, userId, message, isAdminNotification = 0) {
+  const id = uuidv4();
+  const timestamp = new Date().toISOString();
+  await db.run(
+    'INSERT INTO notificacoes (id, userId, mensagem, timestamp, lida, isAdminNotification) VALUES (?, ?, ?, ?, ?, ?)',
+    [id, userId, message, timestamp, 0, isAdminNotification]
+  );
+}
+
 app.post('/api/users', async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) {
@@ -18,8 +33,7 @@ app.post('/api/users', async (req, res) => {
 
   try {
     const db = await dbPromise;
-    const result = await db.run('INSERT INTO usuarios (username, password) VALUES (?, ?)', [username, password]);
-    
+    const result = await db.run('INSERT INTO usuarios (username, password, role) VALUES (?, ?, ?)', [username, password, 'employee']);
     res.status(201).json({ id: result.lastID, username });
   } catch (error) {
     console.error('Error creating user:', error);
@@ -30,7 +44,6 @@ app.post('/api/users', async (req, res) => {
   }
 });
 
-// Login endpoint
 app.post('/api/login', async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) {
@@ -39,25 +52,48 @@ app.post('/api/login', async (req, res) => {
 
   try {
     const db = await dbPromise;
-    const user = await db.get('SELECT id, username, password FROM usuarios WHERE username = ?', [username]);
+    const user = await db.get('SELECT id, username, password, role FROM usuarios WHERE username = ?', [username]);
 
     if (!user) {
       return res.status(401).json({ error: 'Credenciais inválidas' });
     }
 
-    if (password === user.password) {
-      // Fetch the linked employee record
-      const employee = await db.get('SELECT * FROM funcionarios WHERE user_id = ?', [user.id]);
-      
-      const { password: userPassword, ...userWithoutPassword } = user; // Renomeia a propriedade 'password' para userPassword antes de desestruturar
-      
-      // If an employee is linked, return the employee details as the main user object
-      if (employee) {
-        res.json({ message: 'Login successful', user: employee });
+                if (password === user.password) {
+
+                  const employee = await db.get('SELECT * FROM funcionarios WHERE user_id = ?', [user.id]);
+
+                  const { password: userPassword, ...userWithoutPassword } = user;
+
+          
+          if (employee) {
+        res.json({
+          message: 'Login successful',
+          user: {
+            id: user.id.toString(),
+            employeeId: employee.id,
+            name: employee.name,
+            email: employee.email || '',
+            role: user.role,
+            department: employee.department || '',
+            ctps: employee.ctps,
+            admissionDate: employee.admissionDate,
+            // workScheduleTemplateId: employee.workScheduleTemplateId, // REMOVIDO
+          },
+        });
       } else {
-        // If no employee is linked, return a basic user object
-        // This is useful for an admin that isn't also an employee
-        res.json({ message: 'Login successful', user: { id: user.id.toString(), name: user.username, role: 'admin', department: 'System' } });
+        res.json({
+          message: 'Login successful',
+          user: {
+            id: user.id.toString(),
+            name: user.username,
+            email: '',
+            role: user.role,
+            department: '',
+            ctps: '',
+            admissionDate: '',
+            // workScheduleTemplateId: null, // REMOVIDO
+          },
+        });
       }
     } else {
       res.status(401).json({ error: 'Credenciais inválidas' });
@@ -68,11 +104,10 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
-// GET all users
 app.get('/api/users', async (req, res) => {
   try {
     const db = await dbPromise;
-    const users = await db.all('SELECT id, username FROM usuarios');
+    const users = await db.all('SELECT id, username, role FROM usuarios');
     res.json(users);
   } catch (error) {
     console.error('Error fetching users:', error);
@@ -80,7 +115,34 @@ app.get('/api/users', async (req, res) => {
   }
 });
 
-// Link user to employee
+app.put('/api/users/:id/role', async (req, res) => {
+  const userId = req.params.id;
+  const { role } = req.body;
+  if (!role) {
+    return res.status(400).json({ error: 'A role é obrigatória para atualização.' });
+  }
+  const validRoles = ['employee', 'manager', 'admin'];
+  if (!validRoles.includes(role)) {
+    return res.status(400).json({ error: 'Role inválida. As roles permitidas são: employee, manager, admin.' });
+  }
+
+  try {
+    const db = await dbPromise;
+    const result = await db.run(
+      'UPDATE usuarios SET role = ? WHERE id = ?',
+      [role, userId]
+    );
+
+    if (result.changes === 0) {
+      return res.status(404).json({ error: 'Usuário não encontrado ou role não alterada.' });
+    }
+    res.status(200).json({ id: userId, role: role, message: 'Role do usuário atualizada com sucesso.' });
+  } catch (error) {
+    console.error('Error updating user role:', error);
+    res.status(500).json({ error: 'Erro interno do servidor' });
+  }
+});
+
 app.put('/api/employees/:id/link', async (req, res) => {
   const { userId } = req.body;
   const employeeId = req.params.id;
@@ -91,13 +153,10 @@ app.put('/api/employees/:id/link', async (req, res) => {
 
   try {
     const db = await dbPromise;
-    // Set the user_id for the employee. Use NULL to unlink.
     const result = await db.run('UPDATE funcionarios SET user_id = ? WHERE id = ?', [userId, employeeId]);
-
     if (result.changes === 0) {
       return res.status(404).json({ error: 'Funcionário não encontrado' });
     }
-
     res.status(200).json({ message: 'Vínculo de funcionário atualizado com sucesso.' });
   } catch (error) {
     console.error('Error linking user to employee:', error);
@@ -105,7 +164,6 @@ app.put('/api/employees/:id/link', async (req, res) => {
   }
 });
 
-// GET all employees, with their linked username if available
 app.get('/api/employees', async (req, res) => {
   try {
     const db = await dbPromise;
@@ -114,16 +172,16 @@ app.get('/api/employees', async (req, res) => {
         f.id,
         f.name,
         f.email,
-        f.role,
         f.department,
         f.ctps,
         f.admissionDate,
-        f.workScheduleTemplateId,
         f.user_id,
-        u.username
+        u.username,
+        u.role
       FROM funcionarios AS f
       LEFT JOIN usuarios AS u ON f.user_id = u.id
     `);
+    console.log('API /api/employees retornou:', employees); // Adicionar este log
     res.json(employees);
   } catch (error) {
     console.error('Error fetching employees:', error);
@@ -131,55 +189,75 @@ app.get('/api/employees', async (req, res) => {
   }
 });
 
-// POST a new employee
+app.get('/api/employees/:id', async (req, res) => {
+  const employeeId = req.params.id;
+  try {
+    const db = await dbPromise;
+    const employee = await db.get(`
+      SELECT
+        f.id,
+        f.name,
+        f.email,
+        f.department,
+        f.ctps,
+        f.admissionDate,
+        f.user_id,
+        u.username,
+        u.role
+      FROM funcionarios AS f
+      LEFT JOIN usuarios AS u ON f.user_id = u.id
+      WHERE f.id = ?
+    `, [employeeId]);
+
+    if (!employee) {
+      return res.status(404).json({ error: 'Funcionário não encontrado' });
+    }
+    res.json(employee);
+  } catch (error) {
+    console.error(`Error fetching employee with ID ${employeeId}:`, error);
+    res.status(500).json({ error: 'Erro interno do servidor' });
+  }
+});
+
 app.post('/api/employees', async (req, res) => {
-  const { id, name, email, role, department, ctps, admissionDate, workScheduleTemplateId } = req.body;
-  // Basic validation
-  if (!id || !name || !role) {
-    return res.status(400).json({ error: 'ID, nome e função são obrigatórios para um funcionário' });
+  const { name, email, department, ctps, admissionDate } = req.body; // workScheduleTemplateId REMOVIDO
+  if (!name) {
+    return res.status(400).json({ error: 'Nome do funcionário é obrigatório' });
   }
 
   try {
     const db = await dbPromise;
-
-    // Check if an employee with the same ID already exists
-    const existingEmployeeById = await db.get('SELECT id FROM funcionarios WHERE id = ?', [id]);
-    if (existingEmployeeById) {
-        return res.status(409).json({ error: 'Já existe um funcionário com este ID' });
-    }
-
-    // Check if an employee with the same email already exists
     const existingEmployeeByEmail = await db.get('SELECT id FROM funcionarios WHERE email = ?', [email]);
     if (existingEmployeeByEmail) {
         return res.status(409).json({ error: 'Já existe um funcionário com este e-mail' });
     }
 
     const result = await db.run(
-      'INSERT INTO funcionarios (id, name, email, role, department, ctps, admissionDate, workScheduleTemplateId) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      [id, name, email, role, department, ctps, admissionDate, workScheduleTemplateId]
+      'INSERT INTO funcionarios (name, email, department, ctps, admissionDate) VALUES (?, ?, ?, ?, ?)', // workScheduleTemplateId REMOVIDO
+      [name, email, department, ctps, admissionDate]
     );
-    res.status(201).json({ id, name, email, role, department, ctps, admissionDate, workScheduleTemplateId });
+    res.status(201).json({ id: result.lastID, name, email, department, ctps, admissionDate }); // workScheduleTemplateId REMOVIDO
   } catch (error) {
+    console.error('Error creating employee:', error);
     res.status(500).json({ error: 'Erro interno do servidor' });
   }
 });
 
-// PUT (update) an existing employee
 app.put('/api/employees/:id', async (req, res) => {
   const employeeId = req.params.id;
-  const { name, email, role, department, ctps, admissionDate, workScheduleTemplateId } = req.body;
+  const { name, email, department, ctps, admissionDate } = req.body; // workScheduleTemplateId REMOVIDO
 
   try {
     const db = await dbPromise;
     const result = await db.run(
-      'UPDATE funcionarios SET name = ?, email = ?, role = ?, department = ?, ctps = ?, admissionDate = ?, workScheduleTemplateId = ? WHERE id = ?',
-      [name, email, role, department, ctps, admissionDate, workScheduleTemplateId, employeeId]
+      'UPDATE funcionarios SET name = ?, email = ?, department = ?, ctps = ?, admissionDate = ? WHERE id = ?', // workScheduleTemplateId REMOVIDO
+      [name, email, department, ctps, admissionDate, employeeId]
     );
 
     if (result.changes === 0) {
       return res.status(404).json({ error: 'Funcionário não encontrado' });
     }
-    res.status(200).json({ id: employeeId, name, email, role, department, ctps, admissionDate, workScheduleTemplateId });
+    res.status(200).json({ id: employeeId, name, email, department, ctps, admissionDate }); // workScheduleTemplateId REMOVIDO
   } catch (error) {
     console.error('Error updating employee:', error);
     if (error.code === 'SQLITE_CONSTRAINT') {
@@ -189,108 +267,181 @@ app.put('/api/employees/:id', async (req, res) => {
   }
 });
 
-// DELETE an employee
-app.delete('/api/employees/:id', async (req, res) => {
-  const employeeId = req.params.id;
+// REMOVIDAS TODAS AS ROTAS DE work-schedule-templates e shift-schedules
+
+// --- Dashboard Endpoints ---
+
+// Helper to get records for a date range and user
+async function getRecordsForRange(db, userId, startDate, endDate) {
+  return db.all(
+    'SELECT * FROM registros_ponto WHERE userId = ? AND timestamp BETWEEN ? AND ? ORDER BY timestamp ASC',
+    [userId, startDate, endDate]
+  );
+}
+
+// GET hours per day for the last 7 days (or based on endDate)
+app.get('/api/dashboard/hours-per-day-weekly', async (req, res) => {
+  const { userId, endDate: queryEndDate } = req.query;
+  if (!userId) {
+    return res.status(400).json({ error: 'UserID é obrigatório.' });
+  }
 
   try {
     const db = await dbPromise;
-    const result = await db.run('DELETE FROM funcionarios WHERE id = ?', [employeeId]);
+    const end = queryEndDate ? new Date(queryEndDate) : new Date();
+    const start = new Date(end);
+    start.setDate(end.getDate() - 6);
 
-    if (result.changes === 0) {
-      return res.status(404).json({ error: 'Funcionário não encontrado' });
+    const dailyHours = [];
+    for (let i = 0; i < 7; i++) {
+      const currentDate = new Date(start);
+      currentDate.setDate(start.getDate() + i);
+      const dayStart = currentDate.toISOString().split('T')[0] + 'T00:00:00.000Z';
+      const dayEnd = currentDate.toISOString().split('T')[0] + 'T23:59:59.999Z';
+
+      const records = await getRecordsForRange(db, userId, dayStart, dayEnd);
+      const totalHours = processDailyRecords(records);
+      dailyHours.push({
+        date: currentDate.toISOString().split('T')[0],
+        hours: parseFloat(totalHours.toFixed(2))
+      });
     }
-    res.status(204).send(); // No content for successful deletion
+    res.json(dailyHours);
   } catch (error) {
-    console.error('Error deleting employee:', error);
+    console.error('Error fetching hours per day weekly:', error);
     res.status(500).json({ error: 'Erro interno do servidor' });
   }
 });
 
-// GET all work schedule templates
-app.get('/api/work-schedule-templates', async (req, res) => {
-  try {
-    const db = await dbPromise;
-    const templates = await db.all('SELECT * FROM modelos_horario_trabalho');
-    res.json(templates);
-  } catch (error) {
-    console.error('Error fetching work schedule templates:', error);
-    res.status(500).json({ error: 'Erro interno do servidor' });
-  }
-});
-
-// POST a new work schedule template
-app.post('/api/work-schedule-templates', async (req, res) => {
-  const { id, name, workSchedule, saturdayWorkSchedule, weeklyRestDay } = req.body;
-  if (!id || !name || !workSchedule || !weeklyRestDay) {
-    return res.status(400).json({ error: 'ID, nome, jornada de trabalho e dia de descanso semanal são obrigatórios para um modelo de jornada' });
+// GET total hours worked weekly
+app.get('/api/dashboard/total-hours-weekly', async (req, res) => {
+  const { userId, endDate: queryEndDate } = req.query;
+  if (!userId) {
+    return res.status(400).json({ error: 'UserID é obrigatório.' });
   }
 
   try {
     const db = await dbPromise;
-    const result = await db.run(
-      'INSERT INTO modelos_horario_trabalho (id, name, workSchedule, saturdayWorkSchedule, weeklyRestDay) VALUES (?, ?, ?, ?, ?)',
-      [id, name, workSchedule, saturdayWorkSchedule, weeklyRestDay]
-    );
-    res.status(201).json({ id, name, workSchedule, saturdayWorkSchedule, weeklyRestDay });
-  } catch (error) {
-    console.error('Error creating work schedule template:', error);
-    if (error.code === 'SQLITE_CONSTRAINT') {
-      return res.status(409).json({ error: 'Já existe um modelo de jornada com este ID' });
-    }
-    res.status(500).json({ error: 'Erro interno do servidor' });
-  }
-});
+    const end = queryEndDate ? new Date(queryEndDate) : new Date();
+    const start = new Date(end);
+    start.setDate(end.getDate() - (end.getDay() + 6) % 7);
 
-// PUT (update) an existing work schedule template
-app.put('/api/work-schedule-templates/:id', async (req, res) => {
-  const templateId = req.params.id;
-  const { name, workSchedule, saturdayWorkSchedule, weeklyRestDay } = req.body;
-
-  if (!name || !workSchedule || !weeklyRestDay) {
-    return res.status(400).json({ error: 'Nome, jornada de trabalho e dia de descanso semanal são obrigatórios para atualização do modelo de jornada' });
-  }
-
-  try {
-    const db = await dbPromise;
-    const result = await db.run(
-      'UPDATE modelos_horario_trabalho SET name = ?, workSchedule = ?, saturdayWorkSchedule = ?, weeklyRestDay = ? WHERE id = ?',
-      [name, workSchedule, saturdayWorkSchedule, weeklyRestDay, templateId]
+    const records = await getRecordsForRange(
+      db,
+      userId,
+      start.toISOString().split('T')[0] + 'T00:00:00.000Z',
+      end.toISOString()
     );
 
-    if (result.changes === 0) {
-      return res.status(404).json({ error: 'Modelo de jornada não encontrado' });
+    const recordsByDay = records.reduce((acc, record) => {
+      const date = record.timestamp.split('T')[0];
+      if (!acc[date]) acc[date] = [];
+      acc[date].push(record);
+      return acc;
+    }, {});
+
+    let totalHours = 0;
+    for (const date in recordsByDay) {
+      totalHours += processDailyRecords(recordsByDay[date]);
     }
-    res.status(200).json({ id: templateId, name, workSchedule, saturdayWorkSchedule, weeklyRestDay });
+
+    res.json({ totalHours: parseFloat(totalHours.toFixed(2)) });
   } catch (error) {
-    console.error('Error updating work schedule template:', error);
+    console.error('Error fetching total hours weekly:', error);
     res.status(500).json({ error: 'Erro interno do servidor' });
   }
 });
 
-// DELETE a work schedule template
-app.delete('/api/work-schedule-templates/:id', async (req, res) => {
-  const templateId = req.params.id;
+// GET total hours worked monthly
+app.get('/api/dashboard/total-hours-monthly', async (req, res) => {
+  const { userId, endDate: queryEndDate } = req.query;
+  if (!userId) {
+    return res.status(400).json({ error: 'UserID é obrigatório.' });
+  }
 
   try {
     const db = await dbPromise;
-    const result = await db.run('DELETE FROM modelos_horario_trabalho WHERE id = ?', [templateId]);
+    const end = queryEndDate ? new Date(queryEndDate) : new Date();
+    const start = new Date(end.getFullYear(), end.getMonth(), 1);
+    const endOfMonth = new Date(end.getFullYear(), end.getMonth() + 1, 0);
 
-    if (result.changes === 0) {
-      return res.status(404).json({ error: 'Modelo de jornada não encontrado' });
+    const records = await getRecordsForRange(
+      db,
+      userId,
+      start.toISOString().split('T')[0] + 'T00:00:00.000Z',
+      endOfMonth.toISOString().split('T')[0] + 'T23:59:59.999Z'
+    );
+
+    const recordsByDay = records.reduce((acc, record) => {
+      const date = record.timestamp.split('T')[0];
+      if (!acc[date]) acc[date] = [];
+      acc[date].push(record);
+      return acc;
+    }, {});
+
+    let totalHours = 0;
+    for (const date in recordsByDay) {
+      totalHours += processDailyRecords(recordsByDay[date]);
     }
-    res.status(204).send(); // No content for successful deletion
+
+    res.json({ totalHours: parseFloat(totalHours.toFixed(2)) });
   } catch (error) {
-    console.error('Error deleting work schedule template:', error);
+    console.error('Error fetching total hours monthly:', error);
     res.status(500).json({ error: 'Erro interno do servidor' });
   }
 });
 
-// GET all time records
+// GET total days worked monthly
+app.get('/api/dashboard/total-days-worked-monthly', async (req, res) => {
+  const { userId, endDate: queryEndDate } = req.query;
+  if (!userId) {
+    return res.status(400).json({ error: 'UserID é obrigatório.' });
+  }
+
+  try {
+    const db = await dbPromise;
+    const end = queryEndDate ? new Date(queryEndDate) : new Date();
+    const start = new Date(end.getFullYear(), end.getMonth(), 1);
+    const endOfMonth = new Date(end.getFullYear(), end.getMonth() + 1, 0);
+
+    const records = await getRecordsForRange(
+      db,
+      userId,
+      start.toISOString().split('T')[0] + 'T00:00:00.000Z',
+      endOfMonth.toISOString().split('T')[0] + 'T23:59:59.999Z'
+    );
+
+    const distinctDays = new Set(records.map(record => record.timestamp.split('T')[0]));
+    res.json({ totalDays: distinctDays.size });
+  } catch (error) {
+    console.error('Error fetching total days worked monthly:', error);
+    res.status(500).json({ error: 'Erro interno do servidor' });
+  }
+});
+
+// GET all time records, with optional user ID and date range
 app.get('/api/timerecords', async (req, res) => {
+  const { userId, startDate, endDate } = req.query;
+  
   try {
     const db = await dbPromise;
-    const records = await db.all('SELECT * FROM registros_ponto');
+    let query = 'SELECT * FROM registros_ponto WHERE 1=1';
+
+    const params = [];
+
+    if (userId) {
+      query += ' AND userId = ?';
+      params.push(parseInt(userId, 10));
+    }
+
+    if (startDate && endDate) {
+      query += ' AND timestamp BETWEEN ? AND ?';
+      params.push(startDate, endDate);
+    }
+
+    query += ' ORDER BY timestamp ASC';
+
+    const records = await db.all(query, params);
     res.json(records);
   } catch (error) {
     console.error('Error fetching time records:', error);
@@ -298,31 +449,36 @@ app.get('/api/timerecords', async (req, res) => {
   }
 });
 
-// Import uuidv4 for generating IDs on the backend
-const { v4: uuidv4 } = require('uuid');
-
 // POST a new time record
 app.post('/api/timerecords', async (req, res) => {
-  const { userId, timestamp, type } = req.body;
-  if (!userId || !timestamp || !type) {
-    return res.status(400).json({ error: 'ID do usuário, registro de tempo e tipo são obrigatórios' });
+  const { employeeId, timestamp, type } = req.body;
+  if (!employeeId || !timestamp || !type) {
+    return res.status(400).json({ error: 'ID do funcionário, registro de tempo e tipo são obrigatórios' });
   }
 
   try {
     const db = await dbPromise;
-    const id = uuidv4(); // Generate a unique ID for the new record
+
+    const employee = await db.get('SELECT * FROM funcionarios WHERE id = ?', [parseInt(employeeId, 10)]);
+    if (!employee) {
+      return res.status(404).json({ error: 'Funcionário não encontrado.' });
+    }
+
+    // workScheduleTemplate e lógica de notificação baseada em jornada REMOVIDOS
+
+    const id = uuidv4();
     const result = await db.run(
       'INSERT INTO registros_ponto (id, userId, timestamp, type) VALUES (?, ?, ?, ?)',
-      [id, userId, timestamp, type]
+      [id, employee.id, timestamp, type]
     );
-    res.status(201).json({ id, userId, timestamp, type });
+
+    res.status(201).json({ id, userId: employee.id, timestamp, type });
   } catch (error) {
     console.error('Error creating time record:', error);
     res.status(500).json({ error: 'Erro interno do servidor' });
   }
 });
 
-// PUT (update) an existing time record
 app.put('/api/timerecords/:id', async (req, res) => {
   const recordId = req.params.id;
   const { userId, timestamp, type } = req.body;
@@ -348,7 +504,6 @@ app.put('/api/timerecords/:id', async (req, res) => {
   }
 });
 
-// DELETE a time record
 app.delete('/api/timerecords/:id', async (req, res) => {
   const recordId = req.params.id;
 
@@ -359,16 +514,13 @@ app.delete('/api/timerecords/:id', async (req, res) => {
     if (result.changes === 0) {
       return res.status(404).json({ error: 'Registro de ponto não encontrado' });
     }
-    res.status(204).send(); // No content for successful deletion
+    res.status(204).send();
   } catch (error) {
     console.error('Error deleting time record:', error);
     res.status(500).json({ error: 'Erro interno do servidor' });
   }
 });
 
-// --- Notification Endpoints ---
-
-// POST a new notification
 app.post('/api/notificacoes', async (req, res) => {
   const { userId, mensagem } = req.body;
   if (!userId || !mensagem) {
@@ -381,7 +533,7 @@ app.post('/api/notificacoes', async (req, res) => {
     const timestamp = new Date().toISOString();
     const result = await db.run(
       'INSERT INTO notificacoes (id, userId, mensagem, timestamp, lida) VALUES (?, ?, ?, ?, ?)',
-      [id, userId, mensagem, timestamp, 0] // 0 for unread
+      [id, userId, mensagem, timestamp, 0]
     );
     res.status(201).json({ id, userId, mensagem, timestamp, lida: 0 });
   } catch (error) {
@@ -390,12 +542,26 @@ app.post('/api/notificacoes', async (req, res) => {
   }
 });
 
-// GET notifications for a specific user
 app.get('/api/notificacoes/:userId', async (req, res) => {
   const userId = req.params.userId;
   try {
     const db = await dbPromise;
-    const notificacoes = await db.all('SELECT * FROM notificacoes WHERE userId = ? ORDER BY timestamp DESC', [userId]);
+
+    const employee = await db.get('SELECT role FROM funcionarios WHERE user_id = ?', [userId]);
+    const isAdministrator = employee && (employee.role === 'admin' || employee.role === 'manager');
+
+    let query = '';
+    let params = [];
+
+    if (isAdministrator) {
+      query = `SELECT * FROM notificacoes WHERE isAdminNotification = 1 OR (userId = ? AND isAdminNotification = 0) ORDER BY timestamp DESC`;
+      params = [userId];
+    } else {
+      query = `SELECT * FROM notificacoes WHERE userId = ? AND isAdminNotification = 0 ORDER BY timestamp DESC`;
+      params = [userId];
+    }
+    
+    const notificacoes = await db.all(query, params);
     res.json(notificacoes);
   } catch (error) {
     console.error('Error fetching notifications:', error);
@@ -403,7 +569,6 @@ app.get('/api/notificacoes/:userId', async (req, res) => {
   }
 });
 
-// PUT (mark as read) a notification
 app.put('/api/notificacoes/:id/lida', async (req, res) => {
   const notificationId = req.params.id;
   try {
@@ -419,7 +584,6 @@ app.put('/api/notificacoes/:id/lida', async (req, res) => {
   }
 });
 
-// DELETE a notification
 app.delete('/api/notificacoes/:id', async (req, res) => {
   const notificationId = req.params.id;
   try {
@@ -428,9 +592,33 @@ app.delete('/api/notificacoes/:id', async (req, res) => {
     if (result.changes === 0) {
       return res.status(404).json({ error: 'Notificação não encontrada' });
     }
-    res.status(204).send(); // No content for successful deletion
+    res.status(204).send();
   } catch (error) {
     console.error('Error deleting notification:', error);
+    res.status(500).json({ error: 'Erro interno do servidor' });
+  }
+});
+
+app.get('/api/timerecords/user/:userId', async (req, res) => {
+  const userId = req.params.userId;
+  const { startDate, endDate } = req.query;
+
+  try {
+    const db = await dbPromise;
+    let query = 'SELECT * FROM registros_ponto WHERE userId = ?';
+    const params = [userId];
+
+    if (startDate && endDate) {
+      query += ' AND timestamp BETWEEN ? AND ?';
+      params.push(startDate, endDate);
+    }
+
+    query += ' ORDER BY timestamp ASC';
+
+    const records = await db.all(query, params);
+    res.json(records);
+  } catch (error) {
+    console.error(`Error fetching time records for user ${userId}:`, error);
     res.status(500).json({ error: 'Erro interno do servidor' });
   }
 });

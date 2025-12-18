@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import axios from 'axios';
 import { useTimeRecords } from '@/hooks/useTimeRecords';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -35,6 +36,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogFooter,
+  DialogDescription,
 } from '@/components/ui/dialog';
 
 // Função para converter imagem em Data URI
@@ -68,6 +70,26 @@ export default function Relatorios() {
   const [showPdfPreview, setShowPdfPreview] = useState(false); // Novo estado para controlar o modal de PDF
   const [pdfDataUrl, setPdfDataUrl] = useState<string | null>(null); // Novo estado para a URL do PDF
 
+  // Definir start e end aqui, para que estejam acessíveis em todo o componente
+  const start = useMemo(() => parseISO(startDate), [startDate]);
+  const end = useMemo(() => parseISO(endDate), [endDate]);
+
+  const [employeesList, setEmployeesList] = useState<User[]>([]); // Novo estado para todos os funcionários
+
+  // Efeito para carregar a lista de funcionários
+  useEffect(() => {
+    const fetchEmployees = async () => {
+      try {
+        const response = await axios.get('/api/employees');
+        console.log('Frontend - Dados recebidos da API /api/employees:', response.data); // Adicionar este log
+        setEmployeesList(response.data);
+      } catch (error) {
+        console.error('Erro ao buscar funcionários:', error);
+      }
+    };
+    fetchEmployees();
+  }, []); // Executar apenas uma vez ao montar o componente
+
   // Efeito para limpar o Blob URL quando o componente desmonta ou o PDF é atualizado
   useEffect(() => {
     return () => {
@@ -79,280 +101,295 @@ export default function Relatorios() {
 
 
 
-  const users: User[] = JSON.parse(localStorage.getItem('users') || '[]').filter(
-    (u: User) => u.role === 'employee'
-  );
+  useEffect(() => {
+    const fetchReportData = async () => {
+      setIsLoading(true);
+      // const start = parseISO(startDate);
+      // const end = parseISO(endDate);
 
-  const start = parseISO(startDate);
-  const end = parseISO(endDate);
-
-  let reportData = getAllEmployeesSummary(start, end);
-
-  // Filter by employee
-  if (selectedEmployee !== 'all') {
-    reportData = reportData.filter((d: any) => d.user.id === selectedEmployee);
-  }
-
-  // Filter by hours range
-  if (minHours) {
-    reportData = reportData.filter((d: any) => d.totalHours >= parseFloat(minHours));
-  }
-  if (maxHours) {
-    reportData = reportData.filter((d: any) => d.totalHours <= parseFloat(maxHours));
-  }
-
-  const totalHoursAll = reportData.reduce((sum: number, d: any) => sum + d.totalHours, 0);
-  const totalDaysAll = reportData.reduce((sum: number, d: any) => sum + d.daysWorked, 0);
-  const averageHoursAll = reportData.length > 0 ? totalHoursAll / reportData.length : 0;
-
-    const escapeCSV = (value: string | number | boolean): string => {
-      const stringValue = String(value);
-      // Agora escapamos ';' também
-      if (stringValue.includes(';') || stringValue.includes('"') || stringValue.includes('\n')) {
-        return `"${stringValue.replace(/"/g, '""')}"`;
+      let fetchedData = await getAllEmployeesSummary(start, end, selectedEmployee);
+      console.log('Relatorios.tsx: Dados brutos recebidos de getAllEmployeesSummary:', fetchedData);
+      fetchedData = fetchedData || []; // Ensure it's an array
+      if (minHours) {
+        fetchedData = fetchedData.filter((d: any) => d.totalHours >= parseFloat(minHours));
       }
-      return stringValue;
+      if (maxHours) {
+        fetchedData = fetchedData.filter((d: any) => d.totalHours <= parseFloat(maxHours));
+      }
+
+      setReportData(fetchedData);
+      setIsLoading(false);
     };
-  
-    const exportToCSV = () => {
-      const DELIMITER = ';'; // Usar ponto e vírgula como delimitador
-      const BOM = '\uFEFF'; 
-      let csvData = '';
-  
-      if (selectedEmployee !== 'all') { // Relatório individual detalhado
-        const currentEmployee = users.find(u => u.id === selectedEmployee);
-        if (!currentEmployee) {
-          alert('Funcionário não encontrado para gerar o relatório individual.');
-          return;
-        }
-  
-        // ** Cabeçalho Individual **
-        const individualHeader = [
-          ['sep=' + DELIMITER],
-          [],
-          ['FOLHA DE PONTO INDIVIDUAL DE TRABALHO'],
-          [],
-          ['EMPREGADOR: NOME / EMPRESA', 'CEI / CNPJ Nº'],
-          ['ECOMAIS PRESTADORA DE SERVIÇO LTDA', '54.600.137/0001-06'],
-          ['ENDEREÇO:'],
-          ['RUA 10 N°31 ST FERROVIARIO. BONFINOPOLIS'],
-          [],
-          ['EMPREGADO(A):', 'CTPS Nº E SÉRIE:', 'DATA DE ADMISSÃO:'],
-          [currentEmployee.name, 'N/A', 'N/A'], // CTPS e Admissão não disponíveis
-          [],
-          ['FUNÇÃO:', 'HORÁRIO DE TRABALHO DE SEG. A SEXTA FEIRA:'],
-          [currentEmployee.department, 'N/A'], // Horário não disponível
-          ['HORÁRIO AOS SÁBADOS:', 'DESCANSO SEMANAL:', 'MÊS:', 'ANO:'],
-          ['N/A', 'N/A', format(parseISO(startDate), 'MMMM', { locale: ptBR }), format(parseISO(startDate), 'yyyy')],
-          [],
-          ['----- REGISTROS DIÁRIOS -----'],
-        ].map(row => row.map(escapeCSV).join(DELIMITER)).join('\n');
-  
-        // ** Tabela Diária de Registros **
-        const detailHeaders = ['DIAS', 'ENTRADA', 'INTERVALO SAÍDA', 'INTERVALO RETORNO', 'SAÍDA', 'HORAS EXTRAS'];
-        const detailRows = [];
-  
-        // Loop pelos dias do mês no período
-        const daysInPeriod = Array.from({length: parseInt(format(end, 'dd'))}, (_, i) => i + 1);
-  
-        daysInPeriod.forEach(day => {
-          const date = new Date(start.getFullYear(), start.getMonth(), day);
-          if (date >= start && date <= end) {
-            const dayRecords = getWorkDays(date, date, currentEmployee.id);
-            let entry = '';
-            let breakStart = '';
-            let breakEnd = '';
-            let exit = '';
-            // Horas extras não calculadas, ficam como N/A ou em branco
-            const extras = ''; 
-  
-            if (dayRecords.length > 0 && dayRecords[0].records.length > 0) {
-              const recordsOfDay = dayRecords[0].records.sort((a,b) => parseISO(a.timestamp).getTime() - parseISO(b.timestamp).getTime());
-              
-              entry = recordsOfDay.find(r => r.type === 'clock-in')?.timestamp ? format(parseISO(recordsOfDay.find(r => r.type === 'clock-in')?.timestamp || ''), 'HH:mm') : '';
-              breakStart = recordsOfDay.find(r => r.type === 'break-start')?.timestamp ? format(parseISO(recordsOfDay.find(r => r.type === 'break-start')?.timestamp || ''), 'HH:mm') : '';
-              breakEnd = recordsOfDay.find(r => r.type === 'break-end')?.timestamp ? format(parseISO(recordsOfDay.find(r => r.type === 'break-end')?.timestamp || ''), 'HH:mm') : '';
-              exit = recordsOfDay.find(r => r.type === 'clock-out')?.timestamp ? format(parseISO(recordsOfDay.find(r => r.type === 'clock-out')?.timestamp || ''), 'HH:mm') : '';
-              // Lógica para extras aqui, se for implementada
+
+    fetchReportData();
+  }, [startDate, endDate, selectedEmployee, minHours, maxHours, getAllEmployeesSummary]);
+
+
+
+
+
+  const [reportData, setReportData] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const availableEmployeesForFilter = (employeesList || []); // Agora lista todos os funcionários disponíveis
+
+
+
+
+  const { totalHoursAll, totalDaysAll, averageHoursAll } = useMemo(() => {
+    const hours = reportData.reduce((sum: number, d: any) => sum + d.totalHours, 0);
+    const days = reportData.reduce((sum: number, d: any) => sum + d.daysWorked, 0);
+    const average = reportData.length > 0 ? hours / reportData.length : 0;
+    return { totalHoursAll: hours, totalDaysAll: days, averageHoursAll: average };
+  }, [reportData]);
+      
+        const escapeCSV = (value: any) => {
+          const stringValue = String(value);
+          // Agora escapamos ';' também
+          if (stringValue.includes(';') || stringValue.includes('"') || stringValue.includes('\n')) {
+            return `"${stringValue.replace(/"/g, '""')}"`;
+          }
+          return stringValue;
+        };
+      
+        const exportToCSV = () => {
+          const DELIMITER = ';'; // Usar ponto e vírgula como delimitador
+          const BOM = '\uFEFF'; 
+          let csvData = '';
+      
+                if (selectedEmployee !== 'all') { // Relatório individual detalhado
+                  const currentEmployee = availableEmployeesForFilter.find(u => u.id === selectedEmployee);
+                  if (!currentEmployee) {
+                    alert('Funcionário não encontrado para gerar o relatório individual.');
+                    return;
+                  }      
+            // ** Cabeçalho Individual (similar ao PDF) **
+            const individualHeader = [
+              ['sep=' + DELIMITER],
+              [],
+              ['FOLHA DE PONTO INDIVIDUAL'],
+              [],
+              ['EMPREGADOR:', 'ECOMAIS PRESTADORA DE SERVIÇO LTDA'],
+              ['CNPJ:', '54.600.137/0001-06'],
+              ['PERÍODO:', `${format(start, 'dd/MM/yyyy')} a ${format(end, 'dd/MM/yyyy')}`],
+              [],
+              ['FUNCIONÁRIO:', currentEmployee.name],
+              ['CARGO:', currentEmployee.department || 'N/A'],
+              [],
+            ].map(row => row.map(escapeCSV).join(DELIMITER)).join('\n');
+      
+            // ** Tabela Diária de Registros (espelhando o PDF) **
+            const detailHeaders = ['Dia', 'Data', 'Semana', 'Entrada 1', 'Saída 1', 'Entrada 2', 'Saída 2', 'Horas Trab.', 'Horas Extras', 'Atrasos', 'Obs'];
+            const detailRows = [];
+      
+            const employeeWorkDays = getWorkDays(start, end, currentEmployee.id);
+          
+            for (let i = 1; i <= 31; i++) {
+              const dayStr = i.toString();
+              const dayDate = new Date(start.getFullYear(), start.getMonth(), i);
+      
+              let data = '', semana = '', entrada1 = '', saida1 = '', entrada2 = '', saida2 = '', horas_trab = '', horas_ext = '', atrasos = '', obs = '';
+        
+              if (dayDate.getMonth() === start.getMonth() && dayDate >= start && dayDate <= end) {
+                data = format(dayDate, 'dd/MM');
+                semana = format(dayDate, 'EEE', { locale: ptBR });
+                
+                const workDay = employeeWorkDays.find(d => d.date === format(dayDate, 'yyyy-MM-dd'));
+                
+                if (workDay) {
+                  // Preenche os horários
+                  if (workDay.records.length > 0) {
+                      const dayRecords = workDay.records.sort((a,b) => parseISO(a.timestamp).getTime() - parseISO(b.timestamp).getTime());
+                      const clockIn = dayRecords.find(r => r.type === 'clock-in');
+                      const breakStart = dayRecords.find(r => r.type === 'break-start');
+                      const breakEnd = dayRecords.find(r => r.type === 'break-end');
+                      const clockOut = dayRecords.find(r => r.type === 'clock-out');
+      
+                      entrada1 = clockIn ? format(parseISO(clockIn.timestamp), 'HH:mm') : '';
+                      saida1 = breakStart ? format(parseISO(breakStart.timestamp), 'HH:mm') : '';
+                      entrada2 = breakEnd ? format(parseISO(breakEnd.timestamp), 'HH:mm') : '';
+                      saida2 = clockOut ? format(parseISO(clockOut.timestamp), 'HH:mm') : '';
+                  }
+      
+                  // Preenche horas trabalhadas e extras
+                  horas_trab = workDay.totalHours > 0 ? formatHoursDecimal(workDay.totalHours) : '';
+                  horas_ext = workDay.overtimeHours > 0 ? formatHoursDecimal(workDay.overtimeHours) : '';
+                  
+                  // Lógica de Atrasos e Observações (pode ser implementada aqui)
+                  atrasos = ''; // Placeholder
+                  obs = ''; // Placeholder
+                }
+              }
+      
+              detailRows.push([
+                escapeCSV(dayStr),
+                escapeCSV(data),
+                escapeCSV(semana),
+                escapeCSV(entrada1),
+                escapeCSV(saida1),
+                escapeCSV(entrada2),
+                escapeCSV(saida2),
+                escapeCSV(horas_trab),
+                escapeCSV(horas_ext),
+                escapeCSV(atrasos),
+                escapeCSV(obs),
+              ]);
             }
-            detailRows.push([
-              escapeCSV(format(date, 'dd')),
-              escapeCSV(entry),
-              escapeCSV(breakStart),
-              escapeCSV(breakEnd),
-              escapeCSV(exit),
-              escapeCSV(extras),
+            
+            const detailTable = [detailHeaders.map(escapeCSV).join(DELIMITER), ...detailRows.map((r: string[]) => r.join(DELIMITER))].join('\n');
+      
+            // ** Rodapé Individual **
+            const individualFooter = [
+              [],
+              ['____________________________________________________', '____________________________________________________'], 
+              ['Assinatura do Empregado', 'Assinatura do Empregador'],
+            ].map(row => row.map(escapeCSV).join(DELIMITER)).join('\n');
+      
+            csvData = individualHeader + '\n' + detailTable + '\n\n' + individualFooter;
+      
+          } else { // Relatório geral (como estava antes)
+            const headers = ['Funcionário', 'Departamento', 'Horas Totais', 'Dias Trabalhados', 'Média Diária'];
+            
+            const metadata = [
+              ['sep=' + DELIMITER],
+              [],
+              ['Empresa: Serp Soluções'],
+              [`Relatório de Ponto - Período: ${format(parseISO(startDate), 'dd/MM/yyyy')} a ${format(parseISO(endDate), 'dd/MM/yyyy')}`],
+              [],
+              ['----- DADOS GERAIS POR FUNCIONÁRIO -----'],
+            ].map(row => row.map(escapeCSV).join(DELIMITER)).join('\n');
+      
+            const rows = reportData.map((d: any) => [
+              escapeCSV(d.user.name),
+              escapeCSV(d.user.department),
+              escapeCSV(d.totalHours.toFixed(2).replace('.',',')), // Usar vírgula para decimal
+              escapeCSV(d.daysWorked),
+              escapeCSV(d.averageHoursPerDay.toFixed(2).replace('.',',')), // Usar vírgula para decimal
             ]);
+      
+            const csvContent = [headers.map(escapeCSV).join(DELIMITER), ...rows.map((r: string[]) => r.join(DELIMITER))].join('\n');
+            
+            csvData = metadata + '\n' + csvContent;
           }
-        });
-        const detailTable = [detailHeaders.map(escapeCSV).join(DELIMITER), ...detailRows.map((r: string[]) => r.join(DELIMITER))].join('\n');
-  
-        // ** Rodapé Individual **
-        const individualFooter = [
-          [], // Linha em branco
-          [], // Linha em branco
-          ['-------------------------------------------'], 
-          ['Assinatura: ___________________________________________'],
-        ].map(row => row.map(escapeCSV).join(DELIMITER)).join('\n');
-  
-        csvData = individualHeader + '\n' + detailTable + '\n\n' + individualFooter;
-  
-      } else { // Relatório geral (como estava antes)
-        const headers = ['Funcionário', 'Departamento', 'Horas Totais', 'Dias Trabalhados', 'Média Diária'];
-        
-        // Metadados no topo
-        const metadata = [
-          ['sep=' + DELIMITER], // Informa ao Excel o delimitador
-          [], // Linha em branco
-          ['Empresa: Serp Soluções'],
-          [`Relatório de Ponto - Período: ${format(parseISO(startDate), 'dd/MM/yyyy')} a ${format(parseISO(endDate), 'dd/MM/yyyy')}`],
-          [], // Linha em branco
-          [], // Linha em branco
-          ['----- Dados por Funcionário -----'], // Novo cabeçalho de seção com "bordas"
-        ].map(row => row.map(escapeCSV).join(DELIMITER)).join('\n');
-  
-        const rows = reportData.map((d: any) => [
-          escapeCSV(d.user.name),
-          escapeCSV(d.user.department),
-        escapeCSV(d.totalHours.toFixed(2)),
-          escapeCSV(d.daysWorked),
-          escapeCSV(d.averageHoursPerDay.toFixed(2)),
-        ]);
-  
-        const csvContent = [headers.map(escapeCSV).join(DELIMITER), ...rows.map((r: string[]) => r.join(DELIMITER))].join('\n');
-        
-        const footer = [
-          [], // Linha em branco
-          [], // Linha em branco
-          ['-------------------------------------'], // Linha de separação
-          ['Assinatura do Gerente:'],
-          ['Nome: ____________________________'],
-          ['Data: ____________________________'],
-          [], // Linha em branco
-          ['-------------------------------------'], // Linha de separação
-        ].map(row => row.map(escapeCSV).join(DELIMITER)).join('\n');
-  
-        csvData = metadata + '\n' + csvContent + '\n' + footer; // Não adiciona BOM aqui
-      }
-      
-      const csvBlob = new Blob([BOM + csvData], { type: 'text/csv;charset=utf-8;' });
-      
-      const link = document.createElement('a');
-      link.href = URL.createObjectURL(csvBlob);
-      link.download = `relatorio-ponto-${startDate}-${endDate}.csv`;
-      link.click();
-    };
-
-    const handleExportPdf = async () => {
-      if (selectedEmployee === 'all') {
-        alert('Por favor, selecione um funcionário para gerar o relatório individual.');
-        return;
-      }
-      setShowPdfPreview(true);
-      setPdfDataUrl(null);
-  
-      const currentEmployee = users.find(u => u.id === selectedEmployee);
-      if (!currentEmployee) {
-        alert('Funcionário não encontrado.');
-        setShowPdfPreview(false);
-        return;
-      }
-  
-      const logoUri = await imageToUri('/img/LOGOSISTEMA.png');
-      
-      let html = getTimesheetHtmlTemplate();
-  
-      // 1. Preencher dados do cabeçalho e funcionário
-      html = html.replace('{{logo_src}}', logoUri)
-                 .replace(/{{data_inicio}}/g, format(start, 'dd/MM/yyyy'))
-                 .replace(/{{data_fim}}/g, format(end, 'dd/MM/yyyy'))
-                 .replace(/{{nome_funcionario}}/g, currentEmployee.name)
-                 .replace(/{{cargo}}/g, currentEmployee.department || 'N/A')
-                 .replace(/{{ctps}}/g, 'N/A');
-  
-      // 2. Preencher a tabela de dias
-      const employeeWorkDays = getWorkDays(start, end, currentEmployee.id);
-      
-      for (let i = 1; i <= 31; i++) {
-        const day = i.toString().padStart(2, '0');
-        const dayDate = new Date(start.getFullYear(), start.getMonth(), i);
-  
-        let data = `--/--`, semana = `---`, entrada1 = `--:--`, saida1 = `--:--`, entrada2 = `--:--`, saida2 = `--:--`, horas_trab = `--:--`, horas_ext = `--:--`, atrasos = `--:--`, obs = `-`;
-  
-        // Só processa dias que pertencem ao mês selecionado
-        if (dayDate.getMonth() === start.getMonth()) {
-          data = format(dayDate, 'dd/MM');
-          semana = format(dayDate, 'EEE', { locale: ptBR });
           
-          const workDay = employeeWorkDays.find(d => d.date === format(dayDate, 'yyyy-MM-dd'));
+          const csvBlob = new Blob([BOM + csvData], { type: 'text/csv;charset=utf-8;' });
           
-          if (workDay && workDay.records.length > 0) {
-            const dayRecords = workDay.records.sort((a,b) => parseISO(a.timestamp).getTime() - parseISO(b.timestamp).getTime());
-            
-            const clockIn = dayRecords.find(r => r.type === 'clock-in');
-            const breakStart = dayRecords.find(r => r.type === 'break-start');
-            const breakEnd = dayRecords.find(r => r.type === 'break-end');
-            const clockOut = dayRecords.find(r => r.type === 'clock-out');
-
-            entrada1 = clockIn ? format(parseISO(clockIn.timestamp), 'HH:mm') : '--:--';
-            saida1 = breakStart ? format(parseISO(breakStart.timestamp), 'HH:mm') : '--:--';
-            entrada2 = breakEnd ? format(parseISO(breakEnd.timestamp), 'HH:mm') : '--:--';
-            saida2 = clockOut ? format(parseISO(clockOut.timestamp), 'HH:mm') : '--:--';
-            
-            if (workDay.totalHours > 0) {
-              horas_trab = formatHoursDecimal(workDay.totalHours);
+          const link = document.createElement('a');
+          link.href = URL.createObjectURL(csvBlob);
+          link.download = `relatorio-ponto-${startDate}-${endDate}.csv`;
+          link.click();
+        };
+      
+        const handleExportPdf = async () => {
+          if (selectedEmployee === 'all') {
+            alert('Por favor, selecione um funcionário para gerar o relatório individual.');
+            return;
+          }
+          setShowPdfPreview(true);
+          setPdfDataUrl(null);
+      
+                const currentEmployee = availableEmployeesForFilter.find(u => u.id === selectedEmployee);
+                if (!currentEmployee) {
+                  alert('Funcionário não encontrado.');
+                  setShowPdfPreview(false);
+                  return;
+                }      
+          const logoUri = await imageToUri('/img/LOGOSISTEMA.png');
+          
+          let html = getTimesheetHtmlTemplate();
+      
+          // 1. Preencher dados do cabeçalho e funcionário
+          html = html.replace('{{logo_src}}', logoUri)
+                     .replace(/{{data_inicio}}/g, format(start, 'dd/MM/yyyy'))
+                     .replace(/{{data_fim}}/g, format(end, 'dd/MM/yyyy'))
+                     .replace(/{{nome_funcionario}}/g, currentEmployee.name)
+                     .replace(/{{cargo}}/g, currentEmployee.department || 'N/A')
+                     .replace(/{{ctps}}/g, 'N/A');
+      
+          // 2. Preencher a tabela de dias
+          const employeeWorkDays = getWorkDays(start, end, currentEmployee.id);
+          
+          for (let i = 1; i <= 31; i++) {
+            const day = i.toString().padStart(2, '0');
+            const dayDate = new Date(start.getFullYear(), start.getMonth(), i);
+      
+            let data = `--/--`, semana = `---`, entrada1 = `--:--`, saida1 = `--:--`, entrada2 = `--:--`, saida2 = `--:--`, horas_trab = `--:--`, horas_ext = `--:--`, atrasos = `--:--`, obs = `-`;
+      
+            // Só processa dias que pertencem ao mês selecionado
+            if (dayDate.getMonth() === start.getMonth()) {
+              data = format(dayDate, 'dd/MM');
+              semana = format(dayDate, 'EEE', { locale: ptBR });
+              
+              const workDay = employeeWorkDays.find(d => d.date === format(dayDate, 'yyyy-MM-dd'));
+              
+              if (workDay && workDay.records.length > 0) {
+                const dayRecords = workDay.records.sort((a,b) => parseISO(a.timestamp).getTime() - parseISO(b.timestamp).getTime());
+                
+                const clockIn = dayRecords.find(r => r.type === 'clock-in');
+                const breakStart = dayRecords.find(r => r.type === 'break-start');
+                const breakEnd = dayRecords.find(r => r.type === 'break-end');
+                const clockOut = dayRecords.find(r => r.type === 'clock-out');
+      
+                entrada1 = clockIn ? format(parseISO(clockIn.timestamp), 'HH:mm') : '--:--';
+                saida1 = breakStart ? format(parseISO(breakStart.timestamp), 'HH:mm') : '--:--';
+                entrada2 = breakEnd ? format(parseISO(breakEnd.timestamp), 'HH:mm') : '--:--';
+                saida2 = clockOut ? format(parseISO(clockOut.timestamp), 'HH:mm') : '--:--';
+                
+                if (workDay.totalHours > 0) {
+                  horas_trab = formatHoursDecimal(workDay.totalHours);
+                }
+                if (workDay.overtimeHours > 0) {
+                  horas_ext = formatHoursDecimal(workDay.overtimeHours);
+                }
+              }
             }
-          }
-        }
-  
-        html = html.replace(`{{dia_${day}_data}}`, data)
-                   .replace(`{{dia_${day}_semana}}`, semana)
-                   .replace(`{{dia_${day}_entrada1}}`, entrada1)
-                   .replace(`{{dia_${day}_saida1}}`, saida1)
-                   .replace(`{{dia_${day}_entrada2}}`, entrada2)
-                   .replace(`{{dia_${day}_saida2}}`, saida2)
-                   .replace(`{{dia_${day}_horas_trab}}`, horas_trab)
-                   .replace(`{{dia_${day}_horas_ext}}`, horas_ext)
-                   .replace(`{{dia_${day}_atrasos}}`, atrasos)
-                   .replace(`{{dia_${day}_obs}}`, obs);
-      }
       
-      const reportElement = document.createElement('div');
-      reportElement.style.position = 'absolute';
-      reportElement.style.left = '-3999px';
-      reportElement.innerHTML = html;
-      document.body.appendChild(reportElement);
-  
-      try {
-        const canvas = await html2canvas(reportElement.firstElementChild as HTMLElement, {
-          scale: 3,
-          useCORS: true,
-          width: reportElement.firstElementChild.clientWidth,
-          height: reportElement.firstElementChild.clientHeight,
-        });
-  
-        const imgData = canvas.toDataURL('image/png');
-        const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-        
-        pdf.addImage(imgData, 'PNG', 0, 0, pdf.internal.pageSize.getWidth(), pdf.internal.pageSize.getHeight());
-        
-        const pdfBlob = pdf.output('blob');
-        const blobUrl = URL.createObjectURL(pdfBlob);
-        setPdfDataUrl(blobUrl);
-  
-      } catch (error) {
-        console.error("Erro ao gerar PDF:", error);
-        alert("Ocorreu um erro ao gerar o PDF.");
-        setShowPdfPreview(false);
-      } finally {
-        document.body.removeChild(reportElement);
-      }
-    };
-  
-  
-  
-  
-  
+            html = html.replace(`{{dia_${day}_data}}`, data)
+                       .replace(`{{dia_${day}_semana}}`, semana)
+                       .replace(`{{dia_${day}_entrada1}}`, entrada1)
+                       .replace(`{{dia_${day}_saida1}}`, saida1)
+                       .replace(`{{dia_${day}_entrada2}}`, entrada2)
+                       .replace(`{{dia_${day}_saida2}}`, saida2)
+                       .replace(`{{dia_${day}_horas_trab}}`, horas_trab)
+                       .replace(`{{dia_${day}_horas_ext}}`, horas_ext)
+                       .replace(`{{dia_${day}_atrasos}}`, atrasos)
+                       .replace(`{{dia_${day}_obs}}`, obs);
+          }
+          
+          const reportElement = document.createElement('div');
+          reportElement.style.position = 'absolute';
+          reportElement.style.left = '-3999px';
+          reportElement.innerHTML = html;
+          document.body.appendChild(reportElement);
+      
+          try {
+            const canvas = await html2canvas(reportElement.firstElementChild as HTMLElement, {
+              scale: 3,
+              useCORS: true,
+              width: reportElement.firstElementChild.clientWidth,
+              height: reportElement.firstElementChild.clientHeight,
+            });
+      
+            const imgData = canvas.toDataURL('image/png');
+            const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+            
+            pdf.addImage(imgData, 'PNG', 0, 0, pdf.internal.pageSize.getWidth(), pdf.internal.pageSize.getHeight());
+            
+            const pdfBlob = pdf.output('blob');
+            const blobUrl = URL.createObjectURL(pdfBlob);
+            setPdfDataUrl(blobUrl);
+      
+          } catch (error) {
+            console.error("Erro ao gerar PDF:", error);
+            alert("Ocorreu um erro ao gerar o PDF.");
+            setShowPdfPreview(false);
+          } finally {
+            document.body.removeChild(reportElement);
+          }
+        };  console.log('Relatorios.tsx: isLoading antes da renderização:', isLoading);
+  console.log('Relatorios.tsx: reportData.length antes da renderização:', reportData.length);
+  console.log('Relatorios.tsx: reportData antes da renderização:', reportData);
+
   return (
     <AppLayout>
       <div className="space-y-6">
@@ -413,7 +450,7 @@ export default function Relatorios() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">Todos</SelectItem>
-                    {users.map((user) => (
+                    {availableEmployeesForFilter.map((user) => (
                       <SelectItem key={user.id} value={user.id}>
                         {user.name}
                       </SelectItem>
@@ -446,7 +483,15 @@ export default function Relatorios() {
         </Card>
 
         {/* Summary Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        {isLoading ? (
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <Card><CardContent className="p-4"><div className="h-16 bg-gray-200 rounded animate-pulse"></div></CardContent></Card>
+            <Card><CardContent className="p-4"><div className="h-16 bg-gray-200 rounded animate-pulse"></div></CardContent></Card>
+            <Card><CardContent className="p-4"><div className="h-16 bg-gray-200 rounded animate-pulse"></div></CardContent></Card>
+            <Card><CardContent className="p-4"><div className="h-16 bg-gray-200 rounded animate-pulse"></div></CardContent></Card>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <Card>
             <CardContent className="p-4">
               <div className="flex items-center gap-3">
@@ -502,6 +547,7 @@ export default function Relatorios() {
             </CardContent>
           </Card>
         </div>
+        )}
 
         {/* Data Table */}
         <Card>
@@ -525,17 +571,22 @@ export default function Relatorios() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {reportData.length === 0 ? (
+                  {isLoading ? (
+                    <TableRow>
+                      <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                        Carregando dados...
+                      </TableCell>
+                    </TableRow>
+                  ) : reportData.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
                         Nenhum dado encontrado para os filtros selecionados
                       </TableCell>
                     </TableRow>
-                  ) : (
-                    reportData.map((data: any) => (
-                      <TableRow key={data.user.id} className="hover:bg-secondary/30">
-                        <TableCell className="font-medium">
-                          <div className="flex items-center gap-3">
+                                                          ) : (
+                                                            reportData.map((data: any) => ( // Retorno implícito
+                                                              <TableRow key={data.user.id} className="hover:bg-secondary/30">
+                                                                <TableCell className="font-medium">                          <div className="flex items-center gap-3">
                             <div className="w-8 h-8 rounded-full gradient-bg flex items-center justify-center text-primary-foreground text-sm font-semibold">
                               {data.user.name
                                 .split(' ')
@@ -586,6 +637,7 @@ export default function Relatorios() {
         <DialogContent className="max-w-4xl h-[90vh] flex flex-col">
           <DialogHeader>
             <DialogTitle>Pré-visualização do Relatório PDF</DialogTitle>
+            <DialogDescription>Visualize o relatório antes de exportar ou enviar.</DialogDescription>
           </DialogHeader>
           <div className="flex-1 overflow-hidden rounded-md border">
             {pdfDataUrl ? (
